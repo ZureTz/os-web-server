@@ -1,0 +1,9 @@
+If:
+  PathMatch: 
+    - .*\.c
+    - .*\.h
+
+CompileFlags:
+  Add: 
+    - [-xc]
+    - [-std=c17]
