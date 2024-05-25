@@ -71,4 +71,9 @@ Mkfile.old
 dkms.conf
 
 # log of the web server
-*.log
+/web/webserver.log
+
+# perf data
+/perf.*
+# and generated svg file
+/output.svg

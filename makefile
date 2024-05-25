@@ -4,7 +4,7 @@ FILES.h =
 FILES.o = ${FILES.c:.c=.o}
 
 CC      = gcc
-SFLAGS  = -std=c17
+SFLAGS  = -pthread -std=c17
 GFLAGS  = -g
 OFLAGS  = -O0
 WFLAG1  = # -Wall
