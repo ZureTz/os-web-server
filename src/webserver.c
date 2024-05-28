@@ -47,10 +47,10 @@ struct timespec *global_timer = NULL;
 void argument_check(int argc, char const *argv[]);
 
 // 捕捉 Ctrl+C 信号的 sigIntHandler
-void sig_handler_init();
+void sig_handler_init(void);
 
 // 用来初始化信号量的函数
-sem_t *semaphore_allocate_init(sem_t *semaphore);
+sem_t *semaphore_allocate_init(void);
 
 int main(int argc, char const *argv[]) {
   // 解析命令参数
@@ -60,8 +60,8 @@ int main(int argc, char const *argv[]) {
   sig_handler_init();
 
   // 初始化信号量
-  logging_semaphore = semaphore_allocate_init(logging_semaphore);
-  timer_semaphore = semaphore_allocate_init(timer_semaphore);
+  logging_semaphore = semaphore_allocate_init();
+  timer_semaphore = semaphore_allocate_init();
 
   // 全局计时器初始化
   global_timer = mmap(NULL, sizeof(*global_timer), PROT_READ | PROT_WRITE,
@@ -74,40 +74,47 @@ int main(int argc, char const *argv[]) {
 
   if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     logger(ERROR, "system call", "socket", 0);
+    perror("socket error");
+    exit(EXIT_FAILURE);
   }
 
   const long port = atoi(argv[1]);
 
   if (port < 0 || port > 60000) {
     logger(ERROR, "Invalid port number (try 1->60000)", argv[1], 0);
+    exit(EXIT_FAILURE);
   }
 
   static struct sockaddr_in serv_addr; // static = initialised to zeros
-  serv_addr = (struct sockaddr_in){
-      .sin_addr.s_addr = htonl(INADDR_ANY),
-      .sin_port = htons(port),
-      .sin_zero = "",
-      .sin_family = AF_INET,
-  };
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  serv_addr.sin_port = htons(port);
 
   if (bind(listenfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
     logger(ERROR, "system call", "bind", 0);
+    perror("bind error");
+    exit(EXIT_FAILURE);
   }
 
   if (listen(listenfd, LISTENQ) < 0) {
     logger(ERROR, "system call", "listen", 0);
+    perror("listen error");
+    exit(EXIT_FAILURE);
   }
 
   printf("%s\n", "Server running...waiting for connections.");
 
+  static struct sockaddr_in cli_addr; // static = initialised to zeros
+  socklen_t length = sizeof(cli_addr);
+
   for (long hit = 1;; hit++) {
-    static struct sockaddr_in cli_addr; // static = initialised to zeros
-    socklen_t length = sizeof(cli_addr);
     // Await a connection on socket FD.
     long socketfd;
     if ((socketfd = accept(listenfd, (struct sockaddr *)&cli_addr, &length)) <
         0) {
       logger(ERROR, "system call", "accept", 0);
+      perror("accept error");
+      exit(EXIT_FAILURE);
     }
 
     // Fork一个子进程执行web响应操作
@@ -136,7 +143,7 @@ int main(int argc, char const *argv[]) {
     close(listenfd);
 
     // 回应请求
-    web(socketfd, hit); // never read_returns
+    web(socketfd, hit); // never returns
 
     // 子进程计时器结束
     struct timespec end_t;
@@ -208,7 +215,7 @@ void argument_check(int argc, char const *argv[]) {
   }
 }
 
-void sig_handler_init() {
+void sig_handler_init(void) {
   struct sigaction sigIntHandler;
   sigIntHandler.sa_handler = interrupt_handler;
   sigemptyset(&sigIntHandler.sa_mask);
@@ -217,10 +224,10 @@ void sig_handler_init() {
   sigaction(SIGINT, &sigIntHandler, NULL);
 }
 
-sem_t *semaphore_allocate_init(sem_t *semaphore) {
+sem_t *semaphore_allocate_init(void) {
   // place semaphore in shared memory
-  semaphore = mmap(NULL, sizeof(*semaphore), PROT_READ | PROT_WRITE,
-                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  sem_t *semaphore = mmap(NULL, sizeof(*semaphore), PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
   if (semaphore == MAP_FAILED) {
     perror("mmap");
     exit(EXIT_FAILURE);

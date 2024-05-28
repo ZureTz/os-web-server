@@ -14,8 +14,9 @@ void interrupt_handler(int signal) {
   printf("The sum of the cost by all child proccesses is: %lds, %ldns\n",
          global_timer->tv_sec, global_timer->tv_nsec);
 
-  // destroy semaphores
+  // destroy and munmap semaphores
   printf("Destroying semaphores...\n");
+
   if (sem_destroy(logging_semaphore) < 0) {
     perror("sem_destroy failed");
     exit(EXIT_FAILURE);
@@ -25,6 +26,12 @@ void interrupt_handler(int signal) {
     perror("munmap failed");
     exit(EXIT_FAILURE);
   }
+
+  if (sem_destroy(timer_semaphore) < 0) {
+    perror("sem_destroy failed");
+    exit(EXIT_FAILURE);
+  }
+  
   if (munmap(timer_semaphore, sizeof(*timer_semaphore)) < 0) {
     perror("munmap failed");
     exit(EXIT_FAILURE);

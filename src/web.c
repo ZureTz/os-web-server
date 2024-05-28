@@ -2,11 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "logger.h"
-#include "timer.h"
 #include "types.h"
 #include "web.h"
 
@@ -22,22 +22,25 @@ void web(int fd, int hit) {
 
   static char buffer[BUFSIZE + 1]; // 设置静态缓冲区
 
-  int read_ret;
-  read_ret = read(fd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
-  if (read_ret == 0 ||
-      read_ret ==
-          -1) { // 如果读取客户端消息失败，则向客户端发送 HTTP 失败响应信息
+  const int socket_read_ret =
+      read(fd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
+  if (socket_read_ret == 0 || socket_read_ret == -1) {
+    // 如果读取客户端消息失败，则向客户端发送 HTTP 失败响应信息
     logger(FORBIDDEN, "failed to read browser request", "", fd);
+    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    close(fd);
+    return;
   }
 
-  if (read_ret > 0 &&
-      read_ret < BUFSIZE) { // 设置有效字符串，即将字符串尾部表示为 0
-    buffer[read_ret] = 0;
+  if (socket_read_ret > 0 && socket_read_ret < BUFSIZE) {
+    // 设置有效字符串，即将字符串尾部表示为 0
+    buffer[socket_read_ret] = 0;
   } else {
     buffer[0] = 0;
   }
 
-  for (long i = 0; i < read_ret; i++) { // 移除消息字符串中的“CF”和“LF”字符
+  for (long i = 0; i < socket_read_ret; i++) {
+    // 移除消息字符串中的“CF”和“LF”字符
     if (buffer[i] == '\r' || buffer[i] == '\n') {
       buffer[i] = '*';
     }
@@ -49,6 +52,9 @@ void web(int fd, int hit) {
 
   if (strncmp(buffer, "GET ", 4) && strncmp(buffer, "get ", 4)) {
     logger(FORBIDDEN, "Only simple GET operation supported", buffer, fd);
+    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    close(fd);
+    return;
   }
 
   int buflen = 0;
@@ -67,6 +73,9 @@ void web(int fd, int hit) {
     if (buffer[j] == '.' && buffer[j + 1] == '.') {
       logger(FORBIDDEN, "Parent directory (..) path names not supported",
              buffer, fd);
+      // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+      close(fd);
+      return;
     }
   }
   if (!strncmp(&buffer[0], "GET /\0", 6) ||
@@ -88,19 +97,24 @@ void web(int fd, int hit) {
     }
   }
 
-  if (fstr == 0) {
+  if (fstr == NULL) {
     logger(FORBIDDEN, "file extension type not supported", buffer, fd);
+    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    close(fd);
+    return;
   }
 
   int file_fd = -1;
   if ((file_fd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
     logger(NOTFOUND, "failed to open file", &buffer[5], fd);
+    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    close(fd);
+    return;
   }
 
   logger(LOG, "SEND", &buffer[5], hit);
 
-  long len =
-      (long)lseek(file_fd, (off_t)0, SEEK_END); // 通过 lseek 获取文件长度
+  off_t len = lseek(file_fd, (off_t)0, SEEK_END); // 通过 lseek 获取文件长度
   lseek(file_fd, (off_t)0, SEEK_SET); // 将文件指针移到文件首位置
 
   sprintf(buffer,
@@ -123,16 +137,21 @@ void web(int fd, int hit) {
   write(fd, buffer, strlen(buffer));
 
   // 不停地从文件里读取文件内容，并通过 socket 通道向客户端返回文件内容
-  while ((read_ret = read(file_fd, buffer, BUFSIZE)) > 0) {
-    write(fd, buffer, read_ret);
+  int file_read_ret;
+  while ((file_read_ret = read(file_fd, buffer, BUFSIZE)) > 0) {
+    write(fd, buffer, file_read_ret);
   }
 
-  if (read_ret < 0) {
+  if (file_read_ret < 0) {
     printf("Read Error\n");
-    exit(EXIT_FAILURE);
+    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    close(file_fd);
+    close(fd);
+    return;
   }
 
-  sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+  // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+  close(file_fd);
   close(fd);
 
   // 计时器终点

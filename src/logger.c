@@ -39,28 +39,30 @@ void logger(const int type, const char *s1, const char *s2,
   case FORBIDDEN:
     write(socket_fd,
           "HTTP/1.1 403 Forbidden\n"
-          "Content-Length: 185\n"
+          "Content-Length: 193\n"
           "Connection:close\n"
           "Content-Type: text/html\n\n"
-          "<html><head>\n<title>403Forbidden</title>\n</"
-          "head><body>\n<h1>Forbidden</h1>\n The requested URL, file "
+          "<html>"
+          "<head>\n"
+          "<title>403 Forbidden</title>\n"
+          "</head>"
+          "<body>\n"
+          "<h1>Forbidden</h1>\n"
+          "<p>The requested URL, file "
           "type or operation is not allowed on this simple static file "
-          "webserver.\n</body></html>\n",
-          271);
+          "webserver.</p>\n"
+          "</body>"
+          "</html>\n",
+          278);
     sprintf(logbuffer, "FORBIDDEN: %s:%s", s1, s2);
     break;
 
   case NOTFOUND:
     write(socket_fd,
-          "HTTP/1.1 404 not found\n"
-          "Content length: 136\n"
-          "Connection: close\n"
-          "Content-Type: text/html\n\n"
-          "<html><head>\n"
-          "<title>404 not found</title>\n"
-          "</head><body>\n<h1> Not Found</ h1>\nThe requested URL was "
-          "not found on this server.\n"
-          "<body></html>\n",
+          " HTTP/1.1 404 Not Found\nContent-Length: 136\nConnection: "
+          "close\nContent-Type: text/html\n\n<html><head>\n<title>404 Not "
+          "Found</title>\n</head><body>\n<h1>Not Found</h1>\nThe requested URL "
+          "was not found on this server.\n</body></html>\n",
           224);
     sprintf(logbuffer, "NOT FOUND: %s:%s", s1, s2);
 
