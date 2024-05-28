@@ -7,7 +7,7 @@
 !Makefile
 !makefile
 
-#tempRunnerFile
+# tempRunnerFile
 tempCodeRunnerFile.cc
 **/tempCodeRunnerFile.cc
 
@@ -77,3 +77,6 @@ dkms.conf
 /perf.*
 # and generated svg file
 /output.svg
+
+# vscode conf
+.vscode/

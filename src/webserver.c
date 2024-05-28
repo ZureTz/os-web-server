@@ -118,7 +118,7 @@ int main(int argc, char const *argv[]) {
     }
 
     // Fork一个子进程执行web响应操作
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
 
     if (child_pid < 0) {
       // child_pid < 0, fork操作失败，退出
@@ -128,7 +128,7 @@ int main(int argc, char const *argv[]) {
 
     if (child_pid > 0) {
       // child_pid > 0, 父进程继续接受请求
-      printf("PID %d: Sucessfully forked a child(PID = %d)\n", getpid(),
+      printf("PID %d: Sucessfully forked a child (PID = %d)\n", getpid(),
              child_pid);
       continue;
     }
@@ -137,7 +137,7 @@ int main(int argc, char const *argv[]) {
 
     // 子进程计时开始
     struct timespec start_t;
-    clock_gettime(CLOCK_REALTIME, &start_t);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start_t);
 
     // close listening socket
     close(listenfd);
@@ -147,7 +147,7 @@ int main(int argc, char const *argv[]) {
 
     // 子进程计时器结束
     struct timespec end_t;
-    clock_gettime(CLOCK_REALTIME, &end_t);
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end_t);
     struct timespec diff = timer_diff(start_t, end_t);
 
     // Wait for semaphore

@@ -150,7 +150,7 @@ void web(int fd, int hit) {
     return;
   }
 
-  // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+  // 
   close(file_fd);
   close(fd);
 
