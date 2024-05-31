@@ -2,9 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 
-#include "interrupt.h"
-#include "types.h"
+#include "include/interrupt.h"
+#include "include/types.h"
 
 // Interrupt handler
 void interrupt_handler(int signal) {
@@ -31,7 +32,7 @@ void interrupt_handler(int signal) {
     perror("sem_destroy failed");
     exit(EXIT_FAILURE);
   }
-  
+
   if (munmap(timer_semaphore, sizeof(*timer_semaphore)) < 0) {
     perror("munmap failed");
     exit(EXIT_FAILURE);

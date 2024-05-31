@@ -3,8 +3,6 @@
 #define TYPE_H
 
 #include <semaphore.h>
-#include <stdlib.h>
-#include <time.h>
 
 #define VERSION 23
 #define BUFSIZE 8096

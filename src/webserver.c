@@ -10,6 +10,7 @@
 #define _GNU_SOURCE
 
 #include <arpa/inet.h>
+#include <asm-generic/socket.h>
 #include <netinet/in.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -22,11 +23,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "interrupt.h"
-#include "logger.h"
-#include "timer.h"
-#include "types.h"
-#include "web.h"
+#include "include/interrupt.h"
+#include "include/logger.h"
+#include "include/timer.h"
+#include "include/types.h"
+#include "include/web.h"
 
 // extensions
 struct file_extension extensions[] = {
@@ -71,15 +72,20 @@ int main(int argc, char const *argv[]) {
 
   // 建立服务端侦听 socket
   long listenfd;
-
   if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     logger(ERROR, "system call", "socket", 0);
     perror("socket error");
     exit(EXIT_FAILURE);
   }
 
-  const long port = atoi(argv[1]);
+  const int enable = 1;
+  if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) <
+      0) {
+    perror("setsocket error");
+    exit(EXIT_FAILURE);
+  }
 
+  const long port = atoi(argv[1]);
   if (port < 0 || port > 60000) {
     logger(ERROR, "Invalid port number (try 1->60000)", argv[1], 0);
     exit(EXIT_FAILURE);
@@ -126,10 +132,13 @@ int main(int argc, char const *argv[]) {
       exit(EXIT_FAILURE);
     }
 
+    // 父进程 pid > 0
     if (child_pid > 0) {
-      // child_pid > 0, 父进程继续接受请求
       printf("PID %d: Sucessfully forked a child (PID = %d)\n", getpid(),
              child_pid);
+      // 关闭 socket
+      close(socketfd);
+      // 父进程继续接受请求
       continue;
     }
 

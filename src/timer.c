@@ -1,7 +1,7 @@
 #include <bits/time.h>
 #include <time.h>
 
-#include "timer.h"
+#include "include/timer.h"
 
 // 计时函数, 用来计算时间差
 struct timespec timer_diff(struct timespec start, struct timespec end) {

@@ -71,7 +71,7 @@ Mkfile.old
 dkms.conf
 
 # log of the web server
-/web/webserver.log
+**/log/
 
 # perf data
 /perf.*

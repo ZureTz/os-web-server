@@ -7,17 +7,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "logger.h"
-#include "timer.h"
-#include "types.h"
+#include "include/logger.h"
+#include "include/timer.h"
+#include "include/types.h"
 
 // 日志函数，将运行过程中的提示信息记录到 webserver.log 文件中
 
 void logger(const int type, const char *s1, const char *s2,
             const int socket_fd) {
-  // 计时器起点
-  // struct timespec start_t;
-  // clock_gettime(CLOCK_REALTIME, &start_t);
 
   char timebuffer[BUFSIZE * 2];
   char logbuffer[BUFSIZE * 2];
@@ -83,7 +80,7 @@ void logger(const int type, const char *s1, const char *s2,
 
   // 将 logbuffer 缓存中的消息存入 webserver.log 文件
   int fd = -1;
-  if ((fd = open("webserver.log", O_CREAT | O_WRONLY | O_APPEND, 0644)) >= 0) {
+  if ((fd = open("log/webserver.log", O_CREAT | O_WRONLY | O_APPEND, 0644)) >= 0) {
     write(fd, timebuffer, strlen(timebuffer));
     write(fd, logbuffer, strlen(logbuffer));
     write(fd, "\n", 1);
@@ -97,11 +94,4 @@ void logger(const int type, const char *s1, const char *s2,
     perror("sem_post error");
     exit(EXIT_FAILURE);
   }
-
-  // 计时器终点
-  // struct timespec end_t;
-  // clock_gettime(CLOCK_REALTIME, &end_t);
-  // struct timespec diff = timer_diff(start_t, end_t);
-  // printf("From PID %d, the cost of the logger() is: %lds, %ldns\n", getpid(),
-  //        diff.tv_sec, diff.tv_nsec);
 }

@@ -1,6 +1,6 @@
 PROGRAM = webserver
 FILES.c = src/webserver.c src/interrupt.c src/logger.c src/timer.c src/web.c
-FILES.h = src/interrupt.h src/logger.h src/timer.h src/types.h src/web.h
+FILES.h = src/include/interrupt.h src/include/logger.h src/include/timer.h src/include/types.h src/include/web.h
 FILES.o = ${FILES.c:.c=.o}
 
 CC      = gcc
@@ -19,7 +19,7 @@ CFLAGS  = ${SFLAGS} ${GFLAGS} ${OFLAGS} ${WFLAGS} ${UFLAGS}
 LDFLAGS =
 LDLIBS  =
 
-all:  ${PROGRAM}
+all:	${PROGRAM}
 
 ${PROGRAM}: ${FILES.c} ${FILES.h} ${FILES.o}
 	${CC} -o $@ ${CFLAGS} ${FILES.o} ${LDFLAGS} ${LDLIBS} 
@@ -30,3 +30,8 @@ EMPTY =
 
 clean:
 	${RM_FR} ${subst ${SRC_STR}, ${EMPTY}, ${FILES.o}} ${FILES.o} ${PROGRAM}
+
+RUNTIME_ARGS = 8088 web/
+
+run: ${PROGRAM}
+	./${PROGRAM} ${RUNTIME_ARGS}

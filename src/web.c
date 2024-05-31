@@ -6,9 +6,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "logger.h"
-#include "types.h"
-#include "web.h"
+#include "include/logger.h"
+#include "include/types.h"
+#include "include/web.h"
 
 // 此函数完成了 WebServer
 // 主要功能，它首先解析客户端发送的消息，然后从中获取客户端请求的文
@@ -27,7 +27,6 @@ void web(int fd, int hit) {
   if (socket_read_ret == 0 || socket_read_ret == -1) {
     // 如果读取客户端消息失败，则向客户端发送 HTTP 失败响应信息
     logger(FORBIDDEN, "failed to read browser request", "", fd);
-    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
     close(fd);
     return;
   }
@@ -52,7 +51,6 @@ void web(int fd, int hit) {
 
   if (strncmp(buffer, "GET ", 4) && strncmp(buffer, "get ", 4)) {
     logger(FORBIDDEN, "Only simple GET operation supported", buffer, fd);
-    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
     close(fd);
     return;
   }
@@ -73,7 +71,6 @@ void web(int fd, int hit) {
     if (buffer[j] == '.' && buffer[j + 1] == '.') {
       logger(FORBIDDEN, "Parent directory (..) path names not supported",
              buffer, fd);
-      // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
       close(fd);
       return;
     }
@@ -99,7 +96,6 @@ void web(int fd, int hit) {
 
   if (fstr == NULL) {
     logger(FORBIDDEN, "file extension type not supported", buffer, fd);
-    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
     close(fd);
     return;
   }
@@ -107,7 +103,6 @@ void web(int fd, int hit) {
   int file_fd = -1;
   if ((file_fd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
     logger(NOTFOUND, "failed to open file", &buffer[5], fd);
-    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
     close(fd);
     return;
   }
@@ -142,22 +137,16 @@ void web(int fd, int hit) {
     write(fd, buffer, file_read_ret);
   }
 
+  // 读取文件失败
   if (file_read_ret < 0) {
-    printf("Read Error\n");
-    // sleep(1); // sleep 的作用是防止消息未发出，已经将此 socket 通道关闭
+    perror("read error");
     close(file_fd);
     close(fd);
     return;
   }
 
-  // 
+  // 关闭文件，关闭 socket
   close(file_fd);
   close(fd);
-
-  // 计时器终点
-  // struct timespec end_t;
-  // clock_gettime(CLOCK_REALTIME, &end_t);
-  // struct timespec diff = timer_diff(start_t, end_t);
-  // printf("From PID %d, the cost of the web() is: %lds, %ldns\n", getpid(),
-  //        diff.tv_sec, diff.tv_nsec);
+  return;
 }
