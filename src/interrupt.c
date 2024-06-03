@@ -1,4 +1,5 @@
 #include <semaphore.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -6,6 +7,15 @@
 
 #include "include/interrupt.h"
 #include "include/types.h"
+
+void sig_handler_init(void) {
+  struct sigaction sigIntHandler;
+  sigIntHandler.sa_handler = interrupt_handler;
+  sigemptyset(&sigIntHandler.sa_mask);
+  sigIntHandler.sa_flags = 0;
+  // 开始捕捉信号
+  sigaction(SIGINT, &sigIntHandler, NULL);
+}
 
 // Interrupt handler
 void interrupt_handler(int signal) {
@@ -23,20 +33,14 @@ void interrupt_handler(int signal) {
     exit(EXIT_FAILURE);
   }
 
-  if (munmap(logging_semaphore, sizeof(*logging_semaphore)) < 0) {
-    perror("munmap failed");
-    exit(EXIT_FAILURE);
-  }
-
   if (sem_destroy(timer_semaphore) < 0) {
     perror("sem_destroy failed");
     exit(EXIT_FAILURE);
   }
 
-  if (munmap(timer_semaphore, sizeof(*timer_semaphore)) < 0) {
-    perror("munmap failed");
-    exit(EXIT_FAILURE);
-  }
+  free(logging_semaphore);
+  free(timer_semaphore);
+  free(global_timer);
 
   printf("Exiting...\n");
   exit(EXIT_SUCCESS);

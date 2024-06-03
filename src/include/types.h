@@ -21,6 +21,11 @@ struct file_extension {
   const char *filetype;
 };
 
+struct thread_runner_arg {
+  int socketfd;
+  int hit;
+};
+
 // semaphores
 extern sem_t *logging_semaphore;
 extern sem_t *timer_semaphore;

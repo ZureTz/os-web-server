@@ -7,17 +7,16 @@
 
 // to use POSIX features
 #define _POSIX_C_SOURCE 200809L
-#define _GNU_SOURCE
 
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
+#include <bits/pthreadtypes.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <semaphore.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <time.h>
@@ -25,6 +24,7 @@
 
 #include "include/interrupt.h"
 #include "include/logger.h"
+#include "include/thread_runner.h"
 #include "include/timer.h"
 #include "include/types.h"
 #include "include/web.h"
@@ -47,9 +47,6 @@ struct timespec *global_timer = NULL;
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
 
-// 捕捉 Ctrl+C 信号的 sigIntHandler
-void sig_handler_init(void);
-
 // 用来初始化信号量的函数
 sem_t *semaphore_allocate_init(void);
 
@@ -65,10 +62,7 @@ int main(int argc, char const *argv[]) {
   timer_semaphore = semaphore_allocate_init();
 
   // 全局计时器初始化
-  global_timer = mmap(NULL, sizeof(*global_timer), PROT_READ | PROT_WRITE,
-                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-  global_timer->tv_sec = 0;
-  global_timer->tv_nsec = 0;
+  global_timer = (struct timespec *)calloc(1, sizeof(*global_timer));
 
   // 建立服务端侦听 socket
   long listenfd;
@@ -113,6 +107,12 @@ int main(int argc, char const *argv[]) {
   static struct sockaddr_in cli_addr; // static = initialised to zeros
   socklen_t length = sizeof(cli_addr);
 
+  // 初始化线程的 attribute
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  // 设置线程的 attribute 为 detached state (主进程不用等待每个子线程结束)
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
     long socketfd;
@@ -123,67 +123,17 @@ int main(int argc, char const *argv[]) {
       exit(EXIT_FAILURE);
     }
 
-    // Fork一个子进程执行web响应操作
-    const pid_t child_pid = fork();
-
-    if (child_pid < 0) {
-      // child_pid < 0, fork操作失败，退出
-      perror("fork failed");
+    // 线程的临时 tid
+    pthread_t tid;
+    // 需要给 thread runner 传递的参数
+    struct thread_runner_arg *args = calloc(1, sizeof(*args));
+    args->socketfd = socketfd;
+    args->hit = hit;
+    // 创建子线程
+    if (pthread_create(&tid, &attr, thread_runner, args)) {
+      perror("pthread create failed");
       exit(EXIT_FAILURE);
     }
-
-    // 父进程 pid > 0
-    if (child_pid > 0) {
-      printf("PID %d: Sucessfully forked a child (PID = %d)\n", getpid(),
-             child_pid);
-      // 关闭 socket
-      close(socketfd);
-      // 父进程继续接受请求
-      continue;
-    }
-
-    // 子进程 child_pid == 0
-
-    // 子进程计时开始
-    struct timespec start_t;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start_t);
-
-    // close listening socket
-    close(listenfd);
-
-    // 回应请求
-    web(socketfd, hit); // never returns
-
-    // 子进程计时器结束
-    struct timespec end_t;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end_t);
-    struct timespec diff = timer_diff(start_t, end_t);
-
-    // Wait for semaphore
-    if (sem_wait(timer_semaphore) < 0) {
-      perror("sem_wait error");
-      exit(EXIT_FAILURE);
-    }
-
-    // ENTERING CRITICAL SECTION
-
-    // 计时器加上 diff
-    *global_timer = timer_add(*global_timer, diff);
-
-    // CRITICAL SECTION ENDS
-
-    // release semaphore
-    if (sem_post(timer_semaphore) < 0) {
-      perror("sem_post error");
-      exit(EXIT_FAILURE);
-    }
-
-    // 输出子进程的时间
-    printf("The cost of PID %d is: %lds, %ldns\n", getpid(), diff.tv_sec,
-           diff.tv_nsec);
-    // 退出
-    printf("Child process (PID %d) exits successfully\n", getpid());
-    exit(EXIT_SUCCESS);
   }
 }
 
@@ -224,27 +174,13 @@ void argument_check(int argc, char const *argv[]) {
   }
 }
 
-void sig_handler_init(void) {
-  struct sigaction sigIntHandler;
-  sigIntHandler.sa_handler = interrupt_handler;
-  sigemptyset(&sigIntHandler.sa_mask);
-  sigIntHandler.sa_flags = 0;
-  // 开始捕捉信号
-  sigaction(SIGINT, &sigIntHandler, NULL);
-}
-
 sem_t *semaphore_allocate_init(void) {
   // place semaphore in shared memory
-  sem_t *semaphore = mmap(NULL, sizeof(*semaphore), PROT_READ | PROT_WRITE,
-                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-  if (semaphore == MAP_FAILED) {
-    perror("mmap");
-    exit(EXIT_FAILURE);
-  }
+  sem_t *semaphore = (sem_t *)calloc(1, sizeof(*semaphore));
 
   // initialize semaphore
-  if (sem_init(semaphore, 1, 1) < 0) {
-    perror("sem_init");
+  if (sem_init(semaphore, 0, 1) < 0) {
+    perror("sem_init failed");
     exit(EXIT_FAILURE);
   }
 

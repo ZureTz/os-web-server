@@ -15,19 +15,19 @@
 // 件名，然后根据文件名从本地将此文件读入缓存，并生成相应的 HTTP
 // 响应消息；最后通过服务器与客户端的 socket 通道向客户端返回 HTTP 响应消息
 
-void web(int fd, int hit) {
+void web(const int socketfd, const int hit) {
   // 计时器起点
   // struct timespec start_t;
   // clock_gettime(CLOCK_REALTIME, &start_t);
 
-  static char buffer[BUFSIZE + 1]; // 设置静态缓冲区
+  char buffer[BUFSIZE + 1]; // 设置静态缓冲区
 
   const int socket_read_ret =
-      read(fd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
+      read(socketfd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
   if (socket_read_ret == 0 || socket_read_ret == -1) {
     // 如果读取客户端消息失败，则向客户端发送 HTTP 失败响应信息
-    logger(FORBIDDEN, "failed to read browser request", "", fd);
-    close(fd);
+    logger(FORBIDDEN, "failed to read browser request", "", socketfd);
+    close(socketfd);
     return;
   }
 
@@ -50,8 +50,8 @@ void web(int fd, int hit) {
   // 判断客户端 HTTP 请求消息是否为 GET 类型，如果不是则给出相应的响应消息
 
   if (strncmp(buffer, "GET ", 4) && strncmp(buffer, "get ", 4)) {
-    logger(FORBIDDEN, "Only simple GET operation supported", buffer, fd);
-    close(fd);
+    logger(FORBIDDEN, "Only simple GET operation supported", buffer, socketfd);
+    close(socketfd);
     return;
   }
 
@@ -70,8 +70,8 @@ void web(int fd, int hit) {
     // 在消息中检测路径，不允许路径中出现 '.'
     if (buffer[j] == '.' && buffer[j + 1] == '.') {
       logger(FORBIDDEN, "Parent directory (..) path names not supported",
-             buffer, fd);
-      close(fd);
+             buffer, socketfd);
+      close(socketfd);
       return;
     }
   }
@@ -95,15 +95,15 @@ void web(int fd, int hit) {
   }
 
   if (fstr == NULL) {
-    logger(FORBIDDEN, "file extension type not supported", buffer, fd);
-    close(fd);
+    logger(FORBIDDEN, "file extension type not supported", buffer, socketfd);
+    close(socketfd);
     return;
   }
 
   int file_fd = -1;
   if ((file_fd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
-    logger(NOTFOUND, "failed to open file", &buffer[5], fd);
-    close(fd);
+    logger(NOTFOUND, "failed to open file", &buffer[5], socketfd);
+    close(socketfd);
     return;
   }
 
@@ -129,24 +129,24 @@ void web(int fd, int hit) {
           "Connection: close\n"
           "Content-Type: %s\n\n",
           VERSION, len, fstr); // Header + a blank line
-  write(fd, buffer, strlen(buffer));
+  write(socketfd, buffer, strlen(buffer));
 
   // 不停地从文件里读取文件内容，并通过 socket 通道向客户端返回文件内容
   int file_read_ret;
   while ((file_read_ret = read(file_fd, buffer, BUFSIZE)) > 0) {
-    write(fd, buffer, file_read_ret);
+    write(socketfd, buffer, file_read_ret);
   }
 
   // 读取文件失败
   if (file_read_ret < 0) {
     perror("read error");
     close(file_fd);
-    close(fd);
+    close(socketfd);
     return;
   }
 
   // 关闭文件，关闭 socket
   close(file_fd);
-  close(fd);
+  close(socketfd);
   return;
 }

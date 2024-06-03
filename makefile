@@ -1,6 +1,6 @@
 PROGRAM = webserver
-FILES.c = src/webserver.c src/interrupt.c src/logger.c src/timer.c src/web.c
-FILES.h = src/include/interrupt.h src/include/logger.h src/include/timer.h src/include/types.h src/include/web.h
+FILES.c = src/webserver.c src/interrupt.c src/logger.c src/timer.c src/web.c src/thread_runner.c
+FILES.h = src/include/interrupt.h src/include/logger.h src/include/timer.h src/include/types.h src/include/web.h src/include/thread_runner.h
 FILES.o = ${FILES.c:.c=.o}
 
 CC      = gcc
