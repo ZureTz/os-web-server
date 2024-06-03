@@ -17,6 +17,7 @@ struct timespec timer_diff(struct timespec start, struct timespec end) {
   return result;
 }
 
+// 用来计算时间之和
 struct timespec timer_add(struct timespec time1, struct timespec time2) {
   struct timespec result;
   if ((time1.tv_nsec + time2.tv_nsec) >= 1000000000) {
@@ -28,4 +29,9 @@ struct timespec timer_add(struct timespec time1, struct timespec time2) {
   result.tv_sec = time1.tv_sec + time2.tv_sec;
   result.tv_nsec = time1.tv_nsec + time2.tv_nsec;
   return result;
+}
+
+// 用来将 timespec 转换为以毫秒为单位的 double
+double timespec_to_double_in_ms(const struct timespec time) {
+  return time.tv_sec * 1000.0 + time.tv_nsec / 1000000.0;
 }

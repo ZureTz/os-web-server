@@ -42,7 +42,14 @@ sem_t *logging_semaphore = NULL;
 sem_t *timer_semaphore = NULL;
 
 // global timer pointer
-struct timespec *global_timer = NULL;
+struct timespec *global_process_timer = NULL;
+struct timespec *global_rsocket_timer = NULL;
+struct timespec *global_wsocket_timer = NULL;
+struct timespec *global_rfile_timer = NULL;
+struct timespec *global_logger_timer = NULL;
+
+// 子进程数初始化为 0
+long process_count = 0;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -52,6 +59,9 @@ void sig_handler_init(void);
 
 // 用来初始化信号量的函数
 sem_t *semaphore_allocate_init(void);
+
+// 全局计时器初始化
+struct timespec *timer_init(void);
 
 int main(int argc, char const *argv[]) {
   // 解析命令参数
@@ -65,10 +75,11 @@ int main(int argc, char const *argv[]) {
   timer_semaphore = semaphore_allocate_init();
 
   // 全局计时器初始化
-  global_timer = mmap(NULL, sizeof(*global_timer), PROT_READ | PROT_WRITE,
-                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-  global_timer->tv_sec = 0;
-  global_timer->tv_nsec = 0;
+  global_process_timer = timer_init();
+  global_rsocket_timer = timer_init();
+  global_wsocket_timer = timer_init();
+  global_rfile_timer = timer_init();
+  global_logger_timer = timer_init();
 
   // 建立服务端侦听 socket
   long listenfd;
@@ -136,6 +147,8 @@ int main(int argc, char const *argv[]) {
     if (child_pid > 0) {
       printf("PID %d: Sucessfully forked a child (PID = %d)\n", getpid(),
              child_pid);
+      // 成功 fork，子进程的数量增加
+      process_count++;
       // 关闭 socket
       close(socketfd);
       // 父进程继续接受请求
@@ -157,7 +170,7 @@ int main(int argc, char const *argv[]) {
     // 子进程计时器结束
     struct timespec end_t;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end_t);
-    struct timespec diff = timer_diff(start_t, end_t);
+    const struct timespec diff = timer_diff(start_t, end_t);
 
     // Wait for semaphore
     if (sem_wait(timer_semaphore) < 0) {
@@ -168,7 +181,7 @@ int main(int argc, char const *argv[]) {
     // ENTERING CRITICAL SECTION
 
     // 计时器加上 diff
-    *global_timer = timer_add(*global_timer, diff);
+    *global_process_timer = timer_add(*global_process_timer, diff);
 
     // CRITICAL SECTION ENDS
 
@@ -178,9 +191,6 @@ int main(int argc, char const *argv[]) {
       exit(EXIT_FAILURE);
     }
 
-    // 输出子进程的时间
-    printf("The cost of PID %d is: %lds, %ldns\n", getpid(), diff.tv_sec,
-           diff.tv_nsec);
     // 退出
     printf("Child process (PID %d) exits successfully\n", getpid());
     exit(EXIT_SUCCESS);
@@ -250,4 +260,14 @@ sem_t *semaphore_allocate_init(void) {
 
   // passing back
   return semaphore;
+}
+
+struct timespec *timer_init(void) {
+  struct timespec *result =
+      mmap(NULL, sizeof(*global_process_timer), PROT_READ | PROT_WRITE,
+           MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  result->tv_sec = 0;
+  result->tv_nsec = 0;
+
+  return result;
 }
