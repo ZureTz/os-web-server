@@ -7,6 +7,7 @@
 
 // to use POSIX features
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
@@ -42,13 +43,26 @@ sem_t *logging_semaphore = NULL;
 sem_t *timer_semaphore = NULL;
 
 // global timer pointer
-struct timespec *global_timer = NULL;
+struct timespec *global_thread_timer = NULL;
+struct timespec *global_rsocket_timer = NULL;
+struct timespec *global_wsocket_timer = NULL;
+struct timespec *global_rfile_timer = NULL;
+struct timespec *global_logger_timer = NULL;
+
+// 子线程数初始化为 0
+long thread_count = 0;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
 
+// 捕捉 Ctrl+C 信号的 sigIntHandler
+void sig_handler_init(void);
+
 // 用来初始化信号量的函数
 sem_t *semaphore_allocate_init(void);
+
+// 全局计时器初始化
+struct timespec *timer_init(void);
 
 int main(int argc, char const *argv[]) {
   // 解析命令参数
@@ -62,7 +76,11 @@ int main(int argc, char const *argv[]) {
   timer_semaphore = semaphore_allocate_init();
 
   // 全局计时器初始化
-  global_timer = (struct timespec *)calloc(1, sizeof(*global_timer));
+  global_thread_timer = timer_init();
+  global_rsocket_timer = timer_init();
+  global_wsocket_timer = timer_init();
+  global_rfile_timer = timer_init();
+  global_logger_timer = timer_init();
 
   // 建立服务端侦听 socket
   long listenfd;
@@ -134,6 +152,8 @@ int main(int argc, char const *argv[]) {
       perror("pthread create failed");
       exit(EXIT_FAILURE);
     }
+    // 创建进程成功，进程数增加
+    thread_count++;
   }
 }
 
@@ -186,4 +206,9 @@ sem_t *semaphore_allocate_init(void) {
 
   // passing back
   return semaphore;
+}
+
+// 全局计时器初始化
+struct timespec *timer_init(void) {
+  return calloc(1, sizeof(struct timespec));
 }

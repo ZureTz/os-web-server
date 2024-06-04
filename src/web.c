@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "include/logger.h"
+#include "include/timer.h"
 #include "include/types.h"
 #include "include/web.h"
 
@@ -16,9 +17,9 @@
 // 响应消息；最后通过服务器与客户端的 socket 通道向客户端返回 HTTP 响应消息
 
 void web(const int socketfd, const int hit) {
-  // 计时器起点
-  // struct timespec start_t;
-  // clock_gettime(CLOCK_REALTIME, &start_t);
+  // 获取读并处理 socket 的时间
+  struct timespec read_socket_start_t;
+  clock_gettime(CLOCK_REALTIME, &read_socket_start_t);
 
   char buffer[BUFSIZE + 1]; // 设置静态缓冲区
 
@@ -100,6 +101,14 @@ void web(const int socketfd, const int hit) {
     return;
   }
 
+  // 读并处理 socket 的时间结束
+  struct timespec read_socket_end_t;
+  clock_gettime(CLOCK_REALTIME, &read_socket_end_t);
+
+  // 计算 diff
+  const struct timespec rsocket_diff =
+      timer_diff(read_socket_start_t, read_socket_end_t);
+
   int file_fd = -1;
   if ((file_fd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
     logger(NOTFOUND, "failed to open file", &buffer[5], socketfd);
@@ -131,10 +140,31 @@ void web(const int socketfd, const int hit) {
           VERSION, len, fstr); // Header + a blank line
   write(socketfd, buffer, strlen(buffer));
 
+  struct timespec read_file_sum = (struct timespec){
+      .tv_sec = 0,
+      .tv_nsec = 0,
+  };
+
+  struct timespec write_socket_sum = (struct timespec){
+      .tv_sec = 0,
+      .tv_nsec = 0,
+  };
+
   // 不停地从文件里读取文件内容，并通过 socket 通道向客户端返回文件内容
   int file_read_ret;
-  while ((file_read_ret = read(file_fd, buffer, BUFSIZE)) > 0) {
+  while ((file_read_ret = read_with_clocking(&read_file_sum, file_fd, buffer,
+                                             BUFSIZE)) > 0) {
+    struct timespec write_socket_start_t;
+    clock_gettime(CLOCK_REALTIME, &write_socket_start_t);
+    // 写 socket
     write(socketfd, buffer, file_read_ret);
+
+    struct timespec write_socket_end_t;
+    clock_gettime(CLOCK_REALTIME, &write_socket_end_t);
+    // 计算 diff
+    const struct timespec write_socket_diff =
+        timer_diff(write_socket_start_t, write_socket_end_t);
+    write_socket_sum = timer_add(write_socket_sum, write_socket_diff);
   }
 
   // 读取文件失败
@@ -148,5 +178,45 @@ void web(const int socketfd, const int hit) {
   // 关闭文件，关闭 socket
   close(file_fd);
   close(socketfd);
+
+  // Wait for semaphore
+  if (sem_wait(timer_semaphore) < 0) {
+    perror("sem_wait error");
+    exit(EXIT_FAILURE);
+  }
+
+  // ENTERING CRITICAL SECTION
+
+  // 计时器加上 diff
+  *global_rsocket_timer = timer_add(*global_rsocket_timer, rsocket_diff);
+  *global_rfile_timer = timer_add(*global_rfile_timer, read_file_sum);
+  *global_wsocket_timer = timer_add(*global_wsocket_timer, write_socket_sum);
+
+  // CRITICAL SECTION ENDS
+
+  // release semaphore
+  if (sem_post(timer_semaphore) < 0) {
+    perror("sem_post error");
+    exit(EXIT_FAILURE);
+  }
+
   return;
+}
+
+ssize_t read_with_clocking(struct timespec *file_read_sum, int fd, void *buf,
+                           size_t nbytes) {
+  // 计时开始
+  struct timespec start_t;
+  clock_gettime(CLOCK_REALTIME, &start_t);
+
+  const ssize_t result_size = read(fd, buf, nbytes);
+
+  // 计时结束
+  struct timespec end_t;
+  clock_gettime(CLOCK_REALTIME, &end_t);
+  // 计算差值并相加
+  const struct timespec diff = timer_diff(start_t, end_t);
+  *file_read_sum = timer_add(*file_read_sum, diff);
+
+  return result_size;
 }

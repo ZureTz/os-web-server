@@ -31,7 +31,14 @@ extern sem_t *logging_semaphore;
 extern sem_t *timer_semaphore;
 
 // global timers
-extern struct timespec *global_timer;
+extern struct timespec *global_thread_timer;
+extern struct timespec *global_rsocket_timer;
+extern struct timespec *global_wsocket_timer;
+extern struct timespec *global_rfile_timer;
+extern struct timespec *global_logger_timer;
+
+// 创建的子线程的数量
+extern long thread_count;
 
 // file extensions
 extern struct file_extension extensions[];

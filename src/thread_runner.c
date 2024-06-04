@@ -48,7 +48,7 @@ void *thread_runner(void *args) {
   }
 
   // 计时器增加
-  *global_timer = timer_add(*global_timer, diff);
+  *global_thread_timer = timer_add(*global_thread_timer, diff);
 
   // 释放 semaphore
   if (sem_post(timer_semaphore) < 0) {
