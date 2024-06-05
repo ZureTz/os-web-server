@@ -4,17 +4,21 @@
 
 #include <semaphore.h>
 
-#define VERSION 23
+#include "threadpool.h"
+
 #define BUFSIZE 8096
 #define ERROR 42
-#define LOG 44
 #define FORBIDDEN 403
-#define NOTFOUND 404
 #define LISTENQ 64
+#define LOG 44
+#define NOTFOUND 404
+#define VERSION 23
 
 #ifndef SIGCLD
 #define SIGCLD SIGCHLD
 #endif
+
+#define NUM_THREADS 8
 
 struct file_extension {
   const char *ext;
@@ -39,6 +43,9 @@ extern struct timespec *global_logger_timer;
 
 // 创建的子线程的数量
 extern long thread_count;
+
+// 创建的 thread pool 指针，销毁的时候使用
+extern threadpool* global_pool;
 
 // file extensions
 extern struct file_extension extensions[];

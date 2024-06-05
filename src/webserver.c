@@ -26,6 +26,7 @@
 #include "include/interrupt.h"
 #include "include/logger.h"
 #include "include/thread_runner.h"
+#include "include/threadpool.h"
 #include "include/timer.h"
 #include "include/types.h"
 #include "include/web.h"
@@ -51,6 +52,8 @@ struct timespec *global_logger_timer = NULL;
 
 // 子线程数初始化为 0
 long thread_count = 0;
+
+threadpool *global_pool = NULL;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -125,11 +128,9 @@ int main(int argc, char const *argv[]) {
   static struct sockaddr_in cli_addr; // static = initialised to zeros
   socklen_t length = sizeof(cli_addr);
 
-  // 初始化线程的 attribute
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  // 设置线程的 attribute 为 detached state (主进程不用等待每个子线程结束)
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+  // 初始化线程池
+  threadpool *const pool = init_thread_pool(NUM_THREADS);
+  global_pool = pool;
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
@@ -141,18 +142,23 @@ int main(int argc, char const *argv[]) {
       exit(EXIT_FAILURE);
     }
 
-    // 线程的临时 tid
-    pthread_t tid;
+    // 成功，放入线程池中
     // 需要给 thread runner 传递的参数
-    struct thread_runner_arg *args = calloc(1, sizeof(*args));
+    struct thread_runner_arg *const args =
+        (struct thread_runner_arg *)calloc(1, sizeof(*args));
     args->socketfd = socketfd;
     args->hit = hit;
-    // 创建子线程
-    if (pthread_create(&tid, &attr, thread_runner, args)) {
-      perror("pthread create failed");
-      exit(EXIT_FAILURE);
-    }
-    // 创建进程成功，进程数增加
+
+    // 创建 task
+    task *const new_task = (task *)calloc(1, sizeof(task));
+    new_task->next = NULL;
+    new_task->function = (void *)thread_runner;
+    new_task->arg = args;
+
+    // 将 task 放入线程池中›
+    add_task_to_thread_pool(pool, new_task);
+
+    // 创建线程成功，任务数增加
     thread_count++;
   }
 }

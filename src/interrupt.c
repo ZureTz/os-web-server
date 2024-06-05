@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "include/interrupt.h"
+#include "include/threadpool.h"
 #include "include/timer.h"
 #include "include/types.h"
 
@@ -35,7 +36,10 @@ void interrupt_handler(int signal) {
          timespec_to_double_in_ms(*global_rfile_timer) / thread_count);
   printf("\t平均每个客户端完成写日志数据时间为%.2fms\n",
          timespec_to_double_in_ms(*global_logger_timer) / thread_count);
-  // destroy and munmap semaphores
+
+  // 销毁线程池
+  //   destroy_thread_pool(global_pool);
+
   printf("Destroying semaphores...\n");
 
   if (sem_destroy(logging_semaphore) < 0) {

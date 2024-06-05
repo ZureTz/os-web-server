@@ -17,10 +17,9 @@
 #include "include/web.h"
 
 // 子线程进行的任务
-void *thread_runner(void *args) {
-  struct thread_runner_arg *processed_args = (struct thread_runner_arg *)args;
-  const int socketfd = processed_args->socketfd;
-  const int hit = processed_args->hit;
+void thread_runner(struct thread_runner_arg *args) {
+  const int socketfd = args->socketfd;
+  const int hit = args->hit;
 
   // 计时器开始
   struct timespec thread_start_time;
@@ -57,8 +56,8 @@ void *thread_runner(void *args) {
   }
 
   // 释放传递的参数
-  free(processed_args);
+  free(args);
 
   // 退出
-  pthread_exit(NULL);
+  return;
 }
