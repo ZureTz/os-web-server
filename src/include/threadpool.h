@@ -66,7 +66,8 @@ void wait_thread_pool(struct threadpool *pool);
 // 获取线程池中线程数量
 int get_num_of_thread_working(struct threadpool *pool);
 // 创建线程
-int create_thread(struct threadpool *pool, struct thread *pthread, int id, pthread_attr_t attr);
+int create_thread(struct threadpool *pool, struct thread *pthread, int id,
+                  pthread_attr_t attr);
 // 销毁线程池
 void destroy_thread_pool(struct threadpool *pool);
 // 线程运行的逻辑函数
@@ -81,5 +82,10 @@ void destroy_taskqueue(struct taskqueue *queue);
 void push_taskqueue(struct taskqueue *queue, struct task *curtask);
 // take_taskqueue 从任务队列头部提取任务，并在队列中删除此任务
 task *take_taskqueue(struct taskqueue *queue);
+
+// 创建的 thread pool 指针
+extern threadpool *read_message_pool;
+extern threadpool *read_file_pool;
+extern threadpool *send_message_pool;
 
 #endif

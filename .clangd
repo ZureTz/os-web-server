@@ -4,6 +4,12 @@ If:
     - .*\.h
 
 CompileFlags:
-  Add: 
-    - [-xc]
-    - [-std=c17]
+  Add: [
+    -xc, 
+    -std=gnu17, 
+    -I/usr/local/include/glib-2.0, 
+    -I/usr/local/lib/aarch64-linux-gnu/glib-2.0/include, 
+    -I/usr/local/include
+  ]
+  Compiler: gcc
+    

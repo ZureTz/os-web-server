@@ -15,9 +15,6 @@
 
 void logger(const int type, const char *s1, const char *s2,
             const int socket_fd) {
-  // logger 计时开始
-  struct timespec start_t;
-  clock_gettime(CLOCK_REALTIME, &start_t);
 
   char timebuffer[BUFSIZE * 2];
   char logbuffer[BUFSIZE * 2];
@@ -95,31 +92,6 @@ void logger(const int type, const char *s1, const char *s2,
 
   // release semaphore
   if (sem_post(logging_semaphore) < 0) {
-    perror("sem_post error");
-    exit(EXIT_FAILURE);
-  }
-
-  // logger 计时结束
-  struct timespec end_t;
-  clock_gettime(CLOCK_REALTIME, &end_t);
-  // 计算时间差
-  const struct timespec diff = timer_diff(start_t, end_t);
-
-  // Wait for semaphore
-  if (sem_wait(timer_semaphore) < 0) {
-    perror("sem_wait error");
-    exit(EXIT_FAILURE);
-  }
-
-  // ENTERING CRITICAL SECTION
-
-  // 计时器加上 diff
-  *global_logger_timer = timer_add(*global_logger_timer, diff);
-
-  // CRITICAL SECTION ENDS
-
-  // release semaphore
-  if (sem_post(timer_semaphore) < 0) {
     perror("sem_post error");
     exit(EXIT_FAILURE);
   }

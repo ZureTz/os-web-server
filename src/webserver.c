@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <bits/pthreadtypes.h>
+#include <glib.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -23,13 +24,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "include/business.h"
 #include "include/interrupt.h"
 #include "include/logger.h"
-#include "include/thread_runner.h"
 #include "include/threadpool.h"
-#include "include/timer.h"
 #include "include/types.h"
-#include "include/web.h"
 
 // extensions
 struct file_extension extensions[] = {
@@ -41,19 +40,12 @@ struct file_extension extensions[] = {
 
 // semaphore init
 sem_t *logging_semaphore = NULL;
-sem_t *timer_semaphore = NULL;
+sem_t *output_sempaphore = NULL;
 
-// global timer pointer
-struct timespec *global_thread_timer = NULL;
-struct timespec *global_rsocket_timer = NULL;
-struct timespec *global_wsocket_timer = NULL;
-struct timespec *global_rfile_timer = NULL;
-struct timespec *global_logger_timer = NULL;
-
-// 子线程数初始化为 0
-long thread_count = 0;
-
-threadpool *global_pool = NULL;
+// 线程池全局指针，分别代表三种不同的业务
+threadpool *read_message_pool = NULL;
+threadpool *read_file_pool = NULL;
+threadpool *send_message_pool = NULL;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -76,14 +68,7 @@ int main(int argc, char const *argv[]) {
 
   // 初始化信号量
   logging_semaphore = semaphore_allocate_init();
-  timer_semaphore = semaphore_allocate_init();
-
-  // 全局计时器初始化
-  global_thread_timer = timer_init();
-  global_rsocket_timer = timer_init();
-  global_wsocket_timer = timer_init();
-  global_rfile_timer = timer_init();
-  global_logger_timer = timer_init();
+  output_sempaphore = semaphore_allocate_init();
 
   // 建立服务端侦听 socket
   long listenfd;
@@ -128,9 +113,10 @@ int main(int argc, char const *argv[]) {
   static struct sockaddr_in cli_addr; // static = initialised to zeros
   socklen_t length = sizeof(cli_addr);
 
-  // 初始化线程池
-  threadpool *const pool = init_thread_pool(NUM_THREADS);
-  global_pool = pool;
+  // 初始化3个线程池
+  read_message_pool = init_thread_pool(NUM_THREADS);
+  read_file_pool = init_thread_pool(NUM_THREADS);
+  send_message_pool = init_thread_pool(NUM_THREADS);
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
@@ -144,22 +130,19 @@ int main(int argc, char const *argv[]) {
 
     // 成功，放入线程池中
     // 需要给 thread runner 传递的参数
-    struct thread_runner_arg *const args =
-        (struct thread_runner_arg *)calloc(1, sizeof(*args));
-    args->socketfd = socketfd;
-    args->hit = hit;
+    struct read_message_args *const next_args =
+        (struct read_message_args *)malloc(sizeof(*next_args));
+    next_args->socketfd = socketfd;
+    next_args->hit = hit;
 
     // 创建 task
-    task *const new_task = (task *)calloc(1, sizeof(task));
+    task *const new_task = (task *)malloc(sizeof(task));
     new_task->next = NULL;
-    new_task->function = (void *)thread_runner;
-    new_task->arg = args;
+    new_task->function = (void *)read_message;
+    new_task->arg = next_args;
 
-    // 将 task 放入线程池中›
-    add_task_to_thread_pool(pool, new_task);
-
-    // 创建线程成功，任务数增加
-    thread_count++;
+    // 将 task 放入 read_message 线程池中
+    add_task_to_thread_pool(read_message_pool, new_task);
   }
 }
 
@@ -212,9 +195,4 @@ sem_t *semaphore_allocate_init(void) {
 
   // passing back
   return semaphore;
-}
-
-// 全局计时器初始化
-struct timespec *timer_init(void) {
-  return calloc(1, sizeof(struct timespec));
 }

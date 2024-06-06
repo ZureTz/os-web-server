@@ -25,27 +25,13 @@ struct file_extension {
   const char *filetype;
 };
 
-struct thread_runner_arg {
-  int socketfd;
-  int hit;
-};
-
 // semaphores
+
+// logger 写文件使用的信号量
 extern sem_t *logging_semaphore;
-extern sem_t *timer_semaphore;
 
-// global timers
-extern struct timespec *global_thread_timer;
-extern struct timespec *global_rsocket_timer;
-extern struct timespec *global_wsocket_timer;
-extern struct timespec *global_rfile_timer;
-extern struct timespec *global_logger_timer;
-
-// 创建的子线程的数量
-extern long thread_count;
-
-// 创建的 thread pool 指针，销毁的时候使用
-extern threadpool* global_pool;
+// 回应请求所用信号量
+extern sem_t *output_sempaphore;
 
 // file extensions
 extern struct file_extension extensions[];

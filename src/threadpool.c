@@ -64,6 +64,11 @@ void add_task_to_thread_pool(threadpool *pool, task *curtask) {
 // Wait until all working and all blocking task finished
 // 等待当前任务全部运行完
 void wait_thread_pool(threadpool *pool) {
+  pthread_mutex_lock(&pool->queue.has_jobs->mutex);
+  pool->queue.has_jobs->status = false;
+  pthread_cond_broadcast(&pool->queue.has_jobs->cond);
+  pthread_mutex_unlock(&pool->queue.has_jobs->mutex);
+
   pthread_mutex_lock(&pool->thread_count_lock);
   while (pool->queue.length || pool->num_working) {
     // 该条件获得信号之前，该函数一直被阻塞。该函数会在被阻塞之前以原子方式释放相关的互斥锁
@@ -98,10 +103,11 @@ int create_thread(threadpool *pool, thread *pthread, int id,
 
 // 销毁线程池 (需要补全)
 void destroy_thread_pool(threadpool *pool) {
-  // 需等待任务队列为空，并且运行线程执行完任务后，再销毁任务队列
-  wait_thread_pool(pool);
   // 线程池不存活，不再接受任务
   pool->is_alive = false;
+
+  // 销毁任务队列
+  destroy_taskqueue(&pool->queue);
 
   // 销毁线程指针数组，并释放所有为线程池分配的内存
   // 销毁线程指针
@@ -111,21 +117,6 @@ void destroy_thread_pool(threadpool *pool) {
   }
   // 销毁线程数组
   free(pool->threads);
-
-  // 销毁 lock
-  if (pthread_mutex_destroy(&pool->thread_count_lock) != 0) {
-    perror("pthread_mutex_destroy");
-    exit(EXIT_FAILURE);
-  }
-
-  // 销毁 cond
-  if (pthread_cond_destroy(&pool->threads_all_idle) != 0) {
-    perror("pthread_cond_destroy");
-    exit(EXIT_FAILURE);
-  }
-
-  // 销毁任务队列
-  destroy_taskqueue(&pool->queue);
 
   // 销毁线程池本身
   free(pool);
@@ -154,7 +145,7 @@ void *thread_do(thread *pthread) {
     // 没任务的时候一直阻塞
     while (pool->queue.has_jobs->status == false) {
       // note: 这个 cond 要配合 pool->queue.has_jobs->status 的变化来使用
-      printf("%s: waiting...\n", thread_name);
+      // printf("%s: waiting...\n", thread_name);
       pthread_cond_wait(&pool->queue.has_jobs->cond,
                         &pool->queue.has_jobs->mutex);
       printf("%s: received signal...\n", thread_name);
@@ -175,6 +166,7 @@ void *thread_do(thread *pthread) {
     printf("%s: take_taskqueue\n", thread_name);
     task *const current_task = take_taskqueue(&pool->queue);
     if (current_task == NULL) {
+      // printf("%s: Found a null task!\n", thread_name);
       continue;
     }
 
@@ -182,11 +174,10 @@ void *thread_do(thread *pthread) {
     void (*const function)(void *) = current_task->function;
     void *const arg = current_task->arg;
     if (function == NULL) {
-      printf("%s: Trying to call a null function\n", thread_name);
       free(current_task);
       continue;
     }
-
+    printf("%s: function: %p, (arg: %p)\n", thread_name, function, arg);
     function(arg);
     // free task
     free(current_task);
@@ -262,14 +253,14 @@ void init_taskqueue(taskqueue *queue) {
 void destroy_taskqueue(taskqueue *queue) {
   // 删除 has_jobs
   // 1. 释放mutex和cond
-  if (pthread_mutex_destroy(&queue->has_jobs->mutex) != 0) {
-    perror("pthread_mutex_destroy");
-    exit(EXIT_FAILURE);
-  }
-  if (pthread_cond_destroy(&queue->has_jobs->cond) != 0) {
-    perror("pthread_cond_destroy");
-    exit(EXIT_FAILURE);
-  }
+  // if (pthread_mutex_destroy(&queue->has_jobs->mutex) != 0) {
+  //   perror("pthread_mutex_destroy");
+  //   exit(EXIT_FAILURE);
+  // }
+  // if (pthread_cond_destroy(&queue->has_jobs->cond) != 0) {
+  //   perror("pthread_cond_destroy");
+  //   exit(EXIT_FAILURE);
+  // }
   // 2. 释放内存
   free(queue->has_jobs);
 
@@ -297,7 +288,7 @@ void push_taskqueue(taskqueue *queue, task *curtask) {
   curtask->next = queue->rear;
 
   // length++
-  printf("length (== %d)++ \n", queue->length);
+  // printf("length (== %d)++ \n", queue->length);
   queue->length++;
 
   pthread_mutex_lock(&queue->has_jobs->mutex);
@@ -328,15 +319,15 @@ task *take_taskqueue(taskqueue *queue) {
   }
 
   // 将参数的任务从链表中的队列头部取出
-  printf("queue task:%d\n", queue->length);
+  // printf("queue task:%d\n", queue->length);
   task *const to_fetch_task = queue->front->next;
   // 将 dummyhead 的下一个设置为 to_fetch_task 的下一个
   if (queue->front == NULL) {
-    printf("dereference a nullptr queue->front\n");
+    // printf("dereference a nullptr queue->front\n");
     exit(EXIT_FAILURE);
   }
   if (to_fetch_task == NULL) {
-    printf("dereference a nullptr to_fetch_task\n");
+    // printf("dereference a nullptr to_fetch_task\n");
     exit(EXIT_FAILURE);
   }
   queue->front->next = to_fetch_task->next;
@@ -344,18 +335,23 @@ task *take_taskqueue(taskqueue *queue) {
     queue->rear->next = queue->front;
   }
   // length--
-  printf("length (== %d)-- \n", queue->length);
+  // printf("length (== %d)-- \n", queue->length);
   queue->length--;
-
-  // 由于length减少，如果 length 降为 0，那么 queue->has_jobs->status = false;
-  pthread_mutex_lock(&queue->has_jobs->mutex);
-  if (queue->length == 0) {
-    queue->has_jobs->status = false;
-  }
-  pthread_mutex_unlock(&queue->has_jobs->mutex);
 
   // 释放 lock
   pthread_mutex_unlock(&queue->mutex);
+
+  // 由于length减少，如果 length 降为 0，那么 queue->has_jobs->status = false;
+  // printf("pthread_mutex_lock(&queue->has_jobs->mutex)\n");
+  pthread_mutex_lock(&queue->has_jobs->mutex);
+  // printf("pthread_mutex_lock(&queue->has_jobs->mutex) ends.\n");
+  if (queue->length == 0) {
+    queue->has_jobs->status = false;
+  }
+  // printf("pthread_mutex_unlock(&queue->has_jobs->mutex)\n");
+  pthread_mutex_unlock(&queue->has_jobs->mutex);
+  // printf("pthread_mutex_unlock(&queue->has_jobs->mutex) ends.\n");
+
   // 返回 task
   return to_fetch_task;
 }

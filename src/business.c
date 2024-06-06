@@ -1,27 +1,27 @@
 #include <fcntl.h>
+#include <semaphore.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <time.h>
 #include <unistd.h>
 
+#include "include/business.h"
 #include "include/logger.h"
-#include "include/timer.h"
+#include "include/threadpool.h"
 #include "include/types.h"
-#include "include/web.h"
 
-// 此函数完成了 WebServer
-// 主要功能，它首先解析客户端发送的消息，然后从中获取客户端请求的文
-// 件名，然后根据文件名从本地将此文件读入缓存，并生成相应的 HTTP
-// 响应消息；最后通过服务器与客户端的 socket 通道向客户端返回 HTTP 响应消息
+// 读消息
+void read_message(struct read_message_args *const args) {
+  const int socketfd = args->socketfd;
+  const int hit = args->hit;
 
-void web(const int socketfd, const int hit) {
-  // 获取读并处理 socket 的时间
-  struct timespec read_socket_start_t;
-  clock_gettime(CLOCK_REALTIME, &read_socket_start_t);
+  // 释放传进来的参数
+  free(args);
 
-  char buffer[BUFSIZE + 1]; // 设置静态缓冲区
+  // ** 记得完成回应后释放 buffer **
+  char *const buffer = (char *)calloc(BUFSIZE + 1, sizeof(char)); // 设置缓冲区
 
   const int socket_read_ret =
       read(socketfd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
@@ -85,32 +85,59 @@ void web(const int socketfd, const int hit) {
   // 根据预定义在 extensions 中的文件类型，检查请求的文件类型是否本服务器支持
 
   buflen = strlen(buffer);
-  const char *fstr = NULL;
+  const char *filetype = NULL;
 
   for (long i = 0; extensions[i].ext != 0; i++) {
     long len = strlen(extensions[i].ext);
     if (!strncmp(&buffer[buflen - len], extensions[i].ext, len)) {
-      fstr = extensions[i].filetype;
+      filetype = extensions[i].filetype;
       break;
     }
   }
 
-  if (fstr == NULL) {
+  if (filetype == NULL) {
     logger(FORBIDDEN, "file extension type not supported", buffer, socketfd);
     close(socketfd);
     return;
   }
 
-  // 读并处理 socket 的时间结束
-  struct timespec read_socket_end_t;
-  clock_gettime(CLOCK_REALTIME, &read_socket_end_t);
+  // 接下来，调用 read_file
 
-  // 计算 diff
-  const struct timespec rsocket_diff =
-      timer_diff(read_socket_start_t, read_socket_end_t);
+  // 设定参数
+  struct read_file_args *const next_args =
+      (struct read_file_args *)malloc(sizeof(*next_args));
+  // ** 记得完成回应后释放 buffer **
+  next_args->buffer = buffer;
+  next_args->socketfd = socketfd;
+  next_args->filetype = filetype;
+  next_args->hit = hit;
 
-  int file_fd = -1;
-  if ((file_fd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
+  // 创建 task
+  task *const new_task = (task *)malloc(sizeof(task));
+  new_task->next = NULL;
+  new_task->function = (void *)read_file;
+  new_task->arg = next_args;
+
+  // 送进 filename queue
+  add_task_to_thread_pool(read_file_pool, new_task);
+
+  return;
+}
+
+// 打开文件，读文件，调用 send message
+void read_file(struct read_file_args *const args) {
+  // 获得参数内容
+  char *const buffer = args->buffer;
+  const int socketfd = args->socketfd;
+  const char *const filetype = args->filetype;
+  const int hit = args->hit;
+
+  // 释放参数
+  free(args);
+
+  // 打开文件
+  int filefd = -1;
+  if ((filefd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
     logger(NOTFOUND, "failed to open file", &buffer[5], socketfd);
     close(socketfd);
     return;
@@ -118,8 +145,8 @@ void web(const int socketfd, const int hit) {
 
   logger(LOG, "SEND", &buffer[5], hit);
 
-  off_t len = lseek(file_fd, (off_t)0, SEEK_END); // 通过 lseek 获取文件长度
-  lseek(file_fd, (off_t)0, SEEK_SET); // 将文件指针移到文件首位置
+  off_t len = lseek(filefd, (off_t)0, SEEK_END); // 通过 lseek 获取文件长度
+  lseek(filefd, (off_t)0, SEEK_SET); // 将文件指针移到文件首位置
 
   sprintf(buffer,
           "HTTP/1.1 200 OK\n"
@@ -127,7 +154,7 @@ void web(const int socketfd, const int hit) {
           "Content-Length: %ld\n"
           "Connection: close\n"
           "Content-Type: %s",
-          VERSION, len, fstr); // Header without a blank line
+          VERSION, len, filetype); // Header without a blank line
 
   logger(LOG, "Header", buffer, hit);
 
@@ -137,86 +164,74 @@ void web(const int socketfd, const int hit) {
           "Content-Length: %ld\n"
           "Connection: close\n"
           "Content-Type: %s\n\n",
-          VERSION, len, fstr); // Header + a blank line
+          VERSION, len, filetype); // Header + a blank line
+
+  // 准备调用 send_message
+  struct send_mesage_args *const next_args =
+      (struct send_mesage_args *)malloc(sizeof(*next_args));
+  next_args->filefd = filefd;
+  next_args->socketfd = socketfd;
+  next_args->buffer = buffer;
+
+  // 创建 task
+  task *const new_task = (task *)malloc(sizeof(task));
+  new_task->next = NULL;
+  new_task->function = (void *)send_mesage;
+  new_task->arg = next_args;
+
+  // write to socketfd;
+  add_task_to_thread_pool(send_message_pool, new_task);
+
+  return;
+}
+
+// 发送消息
+void send_mesage(struct send_mesage_args *const args) {
+  const int filefd = args->filefd;
+  const int socketfd = args->socketfd;
+  char *const buffer = args->buffer;
+
+  // 释放传进来的参数
+  free(args);
+
+  // 使用信号量保证回应的连续性
+  if (sem_wait(output_sempaphore) < 0) {
+    perror("sem_wait");
+    exit(EXIT_FAILURE);
+  }
+
+  // CRITICAL SECTION BEGINS
+
+  // 写 header
   write(socketfd, buffer, strlen(buffer));
 
-  struct timespec read_file_sum = (struct timespec){
-      .tv_sec = 0,
-      .tv_nsec = 0,
-  };
-
-  struct timespec write_socket_sum = (struct timespec){
-      .tv_sec = 0,
-      .tv_nsec = 0,
-  };
-
+  // 写 body
   // 不停地从文件里读取文件内容，并通过 socket 通道向客户端返回文件内容
-  int file_read_ret;
-  while ((file_read_ret = read_with_clocking(&read_file_sum, file_fd, buffer,
-                                             BUFSIZE)) > 0) {
-    struct timespec write_socket_start_t;
-    clock_gettime(CLOCK_REALTIME, &write_socket_start_t);
-    // 写 socket
-    write(socketfd, buffer, file_read_ret);
+  int bytes_to_write = -1;
+  while ((bytes_to_write = read(filefd, buffer, BUFSIZE)) > 0) {
+    write(socketfd, buffer, bytes_to_write);
+  }
 
-    struct timespec write_socket_end_t;
-    clock_gettime(CLOCK_REALTIME, &write_socket_end_t);
-    // 计算 diff
-    const struct timespec write_socket_diff =
-        timer_diff(write_socket_start_t, write_socket_end_t);
-    write_socket_sum = timer_add(write_socket_sum, write_socket_diff);
+  // CRITICAL SECTION ENDS
+  if (sem_post(output_sempaphore) < 0) {
+    perror("sem_post");
+    exit(EXIT_FAILURE);
   }
 
   // 读取文件失败
-  if (file_read_ret < 0) {
+  if (bytes_to_write < 0) {
     perror("read error");
-    close(file_fd);
+    close(filefd);
     close(socketfd);
     return;
   }
 
   // 关闭文件，关闭 socket
-  close(file_fd);
+  close(filefd);
   close(socketfd);
 
-  // Wait for semaphore
-  if (sem_wait(timer_semaphore) < 0) {
-    perror("sem_wait error");
-    exit(EXIT_FAILURE);
-  }
-
-  // ENTERING CRITICAL SECTION
-
-  // 计时器加上 diff
-  *global_rsocket_timer = timer_add(*global_rsocket_timer, rsocket_diff);
-  *global_rfile_timer = timer_add(*global_rfile_timer, read_file_sum);
-  *global_wsocket_timer = timer_add(*global_wsocket_timer, write_socket_sum);
-
-  // CRITICAL SECTION ENDS
-
-  // release semaphore
-  if (sem_post(timer_semaphore) < 0) {
-    perror("sem_post error");
-    exit(EXIT_FAILURE);
-  }
+  // 释放 buffer
+  free(buffer);
 
   return;
-}
-
-ssize_t read_with_clocking(struct timespec *file_read_sum, int fd, void *buf,
-                           size_t nbytes) {
-  // 计时开始
-  struct timespec start_t;
-  clock_gettime(CLOCK_REALTIME, &start_t);
-
-  const ssize_t result_size = read(fd, buf, nbytes);
-
-  // 计时结束
-  struct timespec end_t;
-  clock_gettime(CLOCK_REALTIME, &end_t);
-  // 计算差值并相加
-  const struct timespec diff = timer_diff(start_t, end_t);
-  *file_read_sum = timer_add(*file_read_sum, diff);
-
-  return result_size;
 }
