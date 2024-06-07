@@ -13,7 +13,7 @@
 #include "include/types.h"
 
 // 读消息
-void read_message(struct read_message_args *const args) {
+void *read_message(struct read_message_args *const args) {
   const int socketfd = args->socketfd;
   const int hit = args->hit;
 
@@ -29,7 +29,7 @@ void read_message(struct read_message_args *const args) {
     // 如果读取客户端消息失败，则向客户端发送 HTTP 失败响应信息
     logger(FORBIDDEN, "failed to read browser request", "", socketfd);
     close(socketfd);
-    return;
+    return NULL;
   }
 
   if (socket_read_ret > 0 && socket_read_ret < BUFSIZE) {
@@ -53,7 +53,7 @@ void read_message(struct read_message_args *const args) {
   if (strncmp(buffer, "GET ", 4) && strncmp(buffer, "get ", 4)) {
     logger(FORBIDDEN, "Only simple GET operation supported", buffer, socketfd);
     close(socketfd);
-    return;
+    return NULL;
   }
 
   int buflen = 0;
@@ -73,7 +73,7 @@ void read_message(struct read_message_args *const args) {
       logger(FORBIDDEN, "Parent directory (..) path names not supported",
              buffer, socketfd);
       close(socketfd);
-      return;
+      return NULL;
     }
   }
   if (!strncmp(&buffer[0], "GET /\0", 6) ||
@@ -98,7 +98,7 @@ void read_message(struct read_message_args *const args) {
   if (filetype == NULL) {
     logger(FORBIDDEN, "file extension type not supported", buffer, socketfd);
     close(socketfd);
-    return;
+    return NULL;
   }
 
   // 接下来，调用 read_file
@@ -121,11 +121,11 @@ void read_message(struct read_message_args *const args) {
   // 送进 filename queue
   add_task_to_thread_pool(read_file_pool, new_task);
 
-  return;
+  return NULL;
 }
 
 // 打开文件，读文件，调用 send message
-void read_file(struct read_file_args *const args) {
+void *read_file(struct read_file_args *const args) {
   // 获得参数内容
   char *const buffer = args->buffer;
   const int socketfd = args->socketfd;
@@ -140,7 +140,7 @@ void read_file(struct read_file_args *const args) {
   if ((filefd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
     logger(NOTFOUND, "failed to open file", &buffer[5], socketfd);
     close(socketfd);
-    return;
+    return NULL;
   }
 
   logger(LOG, "SEND", &buffer[5], hit);
@@ -182,11 +182,11 @@ void read_file(struct read_file_args *const args) {
   // write to socketfd;
   add_task_to_thread_pool(send_message_pool, new_task);
 
-  return;
+  return NULL;
 }
 
 // 发送消息
-void send_mesage(struct send_mesage_args *const args) {
+void *send_mesage(struct send_mesage_args *const args) {
   const int filefd = args->filefd;
   const int socketfd = args->socketfd;
   char *const buffer = args->buffer;
@@ -218,20 +218,12 @@ void send_mesage(struct send_mesage_args *const args) {
     exit(EXIT_FAILURE);
   }
 
-  // 读取文件失败
-  if (bytes_to_write < 0) {
-    perror("read error");
-    close(filefd);
-    close(socketfd);
-    return;
-  }
-
   // 关闭文件，关闭 socket
   close(filefd);
   close(socketfd);
-
+ 
   // 释放 buffer
   free(buffer);
 
-  return;
+  return NULL;
 }

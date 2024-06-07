@@ -1,17 +1,24 @@
+#include <bits/time.h>
+#include <glib.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <time.h>
 
 #include "include/threadpool.h"
+#include "include/timer.h"
 
 threadpool *init_thread_pool(int num_threads) {
   // 创建线程池空间
   threadpool *pool = (threadpool *)calloc(1, sizeof(threadpool));
   pool->num_threads = 0;
   pool->num_working = 0;
+  pool->max_num_working = 0;
+  pool->min_num_working = INT_MAX;
   pool->is_alive = true;
 
   // 初始化互斥量
@@ -45,7 +52,7 @@ threadpool *init_thread_pool(int num_threads) {
   pool->threads = (thread **)calloc(num_threads, sizeof(thread *));
   //创建线程
   for (int i = 0; i < num_threads; i++) {
-    create_thread(pool, pool->threads[i], i, attr);
+    create_thread(pool, &pool->threads[i], i, attr);
   }
 
   // 等所有的线程创建完毕，在每个线程运行函数中将进行 pool->num_threads++操作
@@ -85,26 +92,29 @@ void wait_thread_pool(threadpool *pool) {
 int get_num_of_thread_working(threadpool *pool) { return pool->num_working; }
 
 // 创建线程
-int create_thread(threadpool *pool, thread *pthread, int id,
+int create_thread(threadpool *pool, thread **pthread, int id,
                   pthread_attr_t attr) {
   // 为 pthread 分配内存空间
-  if ((pthread = (thread *)calloc(1, sizeof(thread))) == 0) {
+  if ((*pthread = (thread *)calloc(1, sizeof(thread))) == 0) {
     perror("calloc");
     return -1;
   }
   // 设置这个 thread 的属性
-  pthread->pool = pool;
-  pthread->id = id;
+  (*pthread)->pool = pool;
+  (*pthread)->id = id;
   // 创建线程
-  pthread_create(&pthread->pthread, &attr, (void *)thread_do, pthread);
-  pthread_detach(pthread->pthread);
+  pthread_create(&(*pthread)->pthread, &attr, (void *)thread_do, *pthread);
+  pthread_detach((*pthread)->pthread);
   return 0;
 }
 
-// 销毁线程池 (需要补全)
+// 销毁线程池
 void destroy_thread_pool(threadpool *pool) {
   // 线程池不存活，不再接受任务
   pool->is_alive = false;
+
+  // 等待结束
+  wait_thread_pool(pool);
 
   // 销毁任务队列
   destroy_taskqueue(&pool->queue);
@@ -122,7 +132,7 @@ void destroy_thread_pool(threadpool *pool) {
   free(pool);
 }
 
-// 线程运行的逻辑函数（需要补全）
+// 线程运行的逻辑函数
 void *thread_do(thread *pthread) {
   // 设置线程名字
   char thread_name[128] = {0};
@@ -143,15 +153,34 @@ void *thread_do(thread *pthread) {
     // 如果任务队列中还有任务，则继续运行，否则阻塞
     pthread_mutex_lock(&pool->queue.has_jobs->mutex);
     // 没任务的时候一直阻塞
+
+    // 阻塞开始时间：
+    struct timespec block_start_t;
+    clock_gettime(CLOCK_REALTIME, &block_start_t);
+
     while (pool->queue.has_jobs->status == false) {
       // note: 这个 cond 要配合 pool->queue.has_jobs->status 的变化来使用
       // printf("%s: waiting...\n", thread_name);
       pthread_cond_wait(&pool->queue.has_jobs->cond,
                         &pool->queue.has_jobs->mutex);
-      printf("%s: received signal...\n", thread_name);
+      // printf("%s: received signal...\n", thread_name);
     }
+
+    // 阻塞结束时间：
+    struct timespec block_end_t;
+    clock_gettime(CLOCK_REALTIME, &block_end_t);
+    // 时间差
+    const struct timespec block_diff = timer_diff(block_start_t, block_end_t);
+    thread_block_time_add(block_diff);
+
     pthread_mutex_unlock(&pool->queue.has_jobs->mutex);
-    printf("%s: running...\n", thread_name);
+
+    // 线程开始活跃，计算活跃时间
+    // 活跃开始时间：
+    struct timespec active_start_t;
+    clock_gettime(CLOCK_REALTIME, &active_start_t);
+
+    // printf("%s: running...\n", thread_name);
 
     if (pool->is_alive == false) {
       break;
@@ -159,31 +188,63 @@ void *thread_do(thread *pthread) {
 
     // 执行到此位置，表明线程在工作，需要对工作线程数量进行计数
     pthread_mutex_lock(&pool->thread_count_lock);
+    // 修改之前，确定最大和最小线程工作数量
+    pool->max_num_working = MAX(pool->max_num_working, pool->num_working);
+    pool->min_num_working = MIN(pool->min_num_working, pool->num_working);
+    // 然后再执行：
     pool->num_working++;
     pthread_mutex_unlock(&pool->thread_count_lock);
 
     // take_taskqueue 从任务队列头部提取任务，并在队列中删除此任务
-    printf("%s: take_taskqueue\n", thread_name);
+    // printf("%s: take_taskqueue\n", thread_name);
     task *const current_task = take_taskqueue(&pool->queue);
     if (current_task == NULL) {
       // printf("%s: Found a null task!\n", thread_name);
+      // 执行到此位置，表明线程已经将任务执行完成，需更改工作线程数量
+      pthread_mutex_lock(&pool->thread_count_lock);
+      // 修改之前，确定最大和最小线程工作数量
+      pool->max_num_working = MAX(pool->max_num_working, pool->num_working);
+      pool->min_num_working = MIN(pool->min_num_working, pool->num_working);
+      pool->num_working--;
+      // 此处还需注意，当工作线程数量为 0 ，表示任务全部完成，要让阻塞在
+      // wait_thread_pool() 函数上的线程继续运行
+      if (pool->num_working == 0) {
+        pthread_cond_signal(&pool->threads_all_idle);
+      }
+      pthread_mutex_unlock(&pool->thread_count_lock);
       continue;
     }
 
     // 从任务队列的队首提取任务并执行
-    void (*const function)(void *) = current_task->function;
+    void *(*const function)(void *) = current_task->function;
     void *const arg = current_task->arg;
     if (function == NULL) {
+      // 执行到此位置，表明线程已经将任务执行完成，需更改工作线程数量
+      pthread_mutex_lock(&pool->thread_count_lock);
+      // 修改之前，确定最大和最小线程工作数量
+      pool->max_num_working = MAX(pool->max_num_working, pool->num_working);
+      pool->min_num_working = MIN(pool->min_num_working, pool->num_working);
+      pool->num_working--;
+      // 此处还需注意，当工作线程数量为 0 ，表示任务全部完成，要让阻塞在
+      // wait_thread_pool() 函数上的线程继续运行
+      if (pool->num_working == 0) {
+        pthread_cond_signal(&pool->threads_all_idle);
+      }
+      pthread_mutex_unlock(&pool->thread_count_lock);
+
       free(current_task);
       continue;
     }
-    printf("%s: function: %p, (arg: %p)\n", thread_name, function, arg);
+    // printf("%s: function: %p, (arg: %p)\n", thread_name, function, arg);
     function(arg);
     // free task
     free(current_task);
 
     // 执行到此位置，表明线程已经将任务执行完成，需更改工作线程数量
     pthread_mutex_lock(&pool->thread_count_lock);
+    // 修改之前，确定最大和最小线程工作数量
+    pool->max_num_working = MAX(pool->max_num_working, pool->num_working);
+    pool->min_num_working = MIN(pool->min_num_working, pool->num_working);
     pool->num_working--;
     // 此处还需注意，当工作线程数量为 0 ，表示任务全部完成，要让阻塞在
     // wait_thread_pool() 函数上的线程继续运行
@@ -192,7 +253,16 @@ void *thread_do(thread *pthread) {
     }
     pthread_mutex_unlock(&pool->thread_count_lock);
 
-    printf("%s: finished its job\n", thread_name);
+    // printf("%s: finished its job\n", thread_name);
+
+    // 线程活跃结束
+    // 活跃结束时间：
+    struct timespec active_end_t;
+    clock_gettime(CLOCK_REALTIME, &active_end_t);
+    // 时间差
+    const struct timespec active_diff =
+        timer_diff(active_start_t, active_end_t);
+    thread_active_time_add(active_diff);
   }
   // 运行到此位置表明，线程将要退出，需更改当前线程池中的线程数量
   pthread_mutex_lock(&pool->thread_count_lock);

@@ -20,10 +20,12 @@
 
 #define NUM_THREADS 8
 
+// file extensions
 struct file_extension {
   const char *ext;
   const char *filetype;
 };
+extern struct file_extension extensions[];
 
 // semaphores
 
@@ -33,7 +35,8 @@ extern sem_t *logging_semaphore;
 // 回应请求所用信号量
 extern sem_t *output_sempaphore;
 
-// file extensions
-extern struct file_extension extensions[];
+// 计算平均活跃和阻塞时间之和所用的信号量
+extern sem_t *thread_active_time_sempaphore;
+extern sem_t *thread_block_time_sempaphore;
 
 #endif

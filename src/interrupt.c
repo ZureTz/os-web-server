@@ -25,17 +25,36 @@ void interrupt_handler(int signal) {
 
   // 销毁线程池
   destroy_thread_pool(read_message_pool);
+  destroy_thread_pool(read_file_pool);
+  destroy_thread_pool(send_message_pool);
 
-  printf("Destroying semaphores...\n");
+  // release semaphores
 
   if (sem_destroy(logging_semaphore) < 0) {
     perror("sem_destroy failed");
     exit(EXIT_FAILURE);
   }
 
+  if (sem_destroy(output_sempaphore) < 0) {
+    perror("sem_destroy failed");
+    exit(EXIT_FAILURE);
+  }
+
+  if (sem_destroy(thread_active_time_sempaphore) < 0) {
+    perror("sem_destroy failed");
+    exit(EXIT_FAILURE);
+  }
+
+  if (sem_destroy(thread_block_time_sempaphore) < 0) {
+    perror("sem_destroy failed");
+    exit(EXIT_FAILURE);
+  }
+
   // free semaphores
   free(logging_semaphore);
+  free(output_sempaphore);
+  free(thread_active_time_sempaphore);
+  free(thread_block_time_sempaphore);
 
-  printf("Exiting...\n");
   exit(EXIT_SUCCESS);
 }

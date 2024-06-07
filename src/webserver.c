@@ -12,7 +12,6 @@
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <bits/pthreadtypes.h>
-#include <glib.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -28,19 +27,23 @@
 #include "include/interrupt.h"
 #include "include/logger.h"
 #include "include/threadpool.h"
+#include "include/timer.h"
 #include "include/types.h"
 
 // extensions
 struct file_extension extensions[] = {
-    {"gif", "image/gif"},  {"jpg", "image/jpg"}, {"jpeg", "image/jpeg"},
-    {"png", "image/png"},  {"ico", "image/ico"}, {"zip", "image/zip"},
-    {"gz", "image/gz"},    {"tar", "image/tar"}, {"htm", "text/html"},
-    {"html", "text/html"}, {NULL, NULL},
+    {"gif", "image/gif"}, {"jpg", "image/jpg"},   {"jpeg", "image/jpeg"},
+    {"png", "image/png"}, {"webp", "image/webp"}, {"ico", "image/ico"},
+    {"zip", "image/zip"}, {"gz", "image/gz"},     {"tar", "image/tar"},
+    {"htm", "text/html"}, {"html", "text/html"},  {"css", "text/css"},
+    {NULL, NULL},
 };
 
-// semaphore init
+// semaphore definitions
 sem_t *logging_semaphore = NULL;
 sem_t *output_sempaphore = NULL;
+sem_t *thread_active_time_sempaphore = NULL;
+sem_t *thread_block_time_sempaphore = NULL;
 
 // 线程池全局指针，分别代表三种不同的业务
 threadpool *read_message_pool = NULL;
@@ -56,19 +59,9 @@ void sig_handler_init(void);
 // 用来初始化信号量的函数
 sem_t *semaphore_allocate_init(void);
 
-// 全局计时器初始化
-struct timespec *timer_init(void);
-
 int main(int argc, char const *argv[]) {
   // 解析命令参数
   argument_check(argc, argv);
-
-  // 捕捉 Ctrl+C 信号的 sigIntHandler
-  sig_handler_init();
-
-  // 初始化信号量
-  logging_semaphore = semaphore_allocate_init();
-  output_sempaphore = semaphore_allocate_init();
 
   // 建立服务端侦听 socket
   long listenfd;
@@ -113,10 +106,24 @@ int main(int argc, char const *argv[]) {
   static struct sockaddr_in cli_addr; // static = initialised to zeros
   socklen_t length = sizeof(cli_addr);
 
+  // 捕捉 Ctrl+C 信号的 sigIntHandler
+  sig_handler_init();
+
+  // 初始化信号量
+  logging_semaphore = semaphore_allocate_init();
+  output_sempaphore = semaphore_allocate_init();
+  thread_active_time_sempaphore = semaphore_allocate_init();
+  thread_block_time_sempaphore = semaphore_allocate_init();
+
   // 初始化3个线程池
   read_message_pool = init_thread_pool(NUM_THREADS);
   read_file_pool = init_thread_pool(NUM_THREADS);
   send_message_pool = init_thread_pool(NUM_THREADS);
+
+  // 创建一个 monitor 线程来监控性能
+  pthread_t monitor_thread;
+  pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
+  pthread_detach(monitor_thread);
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.

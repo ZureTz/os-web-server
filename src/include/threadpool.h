@@ -16,9 +16,9 @@ typedef struct staconv {
 
 /* Task */
 typedef struct task {
-  struct task *next;           // 指向下一任务的指针
-  void (*function)(void *arg); // 函数指针
-  void *arg;                   // 函数参数指针
+  struct task *next;            // 指向下一任务的指针
+  void *(*function)(void *arg); // 函数指针
+  void *arg;                    // 函数参数指针
 } task;
 
 /* Task Queue */
@@ -39,6 +39,8 @@ typedef struct threadpool {
 
   volatile int num_threads;          // 线程池中线程数量 (静态)
   volatile int num_working;          // 目前正在工作的线程个数
+  volatile int max_num_working;      // 最大工作线程数量
+  volatile int min_num_working;      // 最小工作线程数量
   pthread_mutex_t thread_count_lock; // 线程池锁, 用于修改上面两个变量
 
   pthread_cond_t threads_all_idle; // 用于销毁线程的条件变量
@@ -66,7 +68,7 @@ void wait_thread_pool(struct threadpool *pool);
 // 获取线程池中线程数量
 int get_num_of_thread_working(struct threadpool *pool);
 // 创建线程
-int create_thread(struct threadpool *pool, struct thread *pthread, int id,
+int create_thread(struct threadpool *pool, struct thread **pthread, int id,
                   pthread_attr_t attr);
 // 销毁线程池
 void destroy_thread_pool(struct threadpool *pool);

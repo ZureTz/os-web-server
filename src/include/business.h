@@ -36,12 +36,12 @@ struct send_mesage_args {
 };
 
 // 读消息
-void read_message(struct read_message_args *const args);
+void* read_message(struct read_message_args *const args);
 
 // 读文件
-void read_file(struct read_file_args *const args);
+void* read_file(struct read_file_args *const args);
 
 // 发送消息
-void send_mesage(struct send_mesage_args *const args);
+void* send_mesage(struct send_mesage_args *const args);
 
 #endif

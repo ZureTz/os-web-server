@@ -9,15 +9,14 @@ GFLAGS  = -g
 OFLAGS  = -O0
 WFLAG1  = -Wall
 WFLAG2  = -Wextra
-WFLAG3  = # -Werror
-WFLAG4  = # -Wstrict-prototypes
-WFLAG5  = # -Wmissing-prototypes
-WFLAGS  = ${WFLAG1} ${WFLAG2} ${WFLAG3} ${WFLAG4} ${WFLAG5}
+WFLAG3  = -Werror
+WFLAGS  = ${WFLAG1} ${WFLAG2} ${WFLAG3}
 UFLAGS  = # Set on command line only
+GLIBFLAGS = `pkg-config --cflags glib-2.0`
 
-CFLAGS  = ${SFLAGS} ${GFLAGS} ${OFLAGS} ${WFLAGS} ${UFLAGS} -I/usr/local/include/glib-2.0 -I/usr/local/lib/aarch64-linux-gnu/glib-2.0/include -I/usr/local/include -pthread 
+CFLAGS  = ${SFLAGS} ${GFLAGS} ${OFLAGS} ${WFLAGS} ${UFLAGS}  ${GLIBFLAGS}
 LDFLAGS = 
-LDLIBS  = -L/usr/local/lib/aarch64-linux-gnu -lglib-2.0
+LDLIBS  = `pkg-config --libs glib-2.0`
 
 all:	${PROGRAM}
 
@@ -28,10 +27,13 @@ RM_FR  = rm -fr
 SRC_STR = src/
 EMPTY = 
 
-clean:
-	${RM_FR} ${subst ${SRC_STR}, ${EMPTY}, ${FILES.o}} ${FILES.o} ${PROGRAM}
-
 RUNTIME_ARGS = 8088 web/
 
 run: all
 	./${PROGRAM} ${RUNTIME_ARGS}
+
+
+clean:
+	${RM_FR} ${FILES.o} ${PROGRAM}
+
+remake: clean all 
