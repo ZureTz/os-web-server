@@ -1,5 +1,7 @@
 #include <fcntl.h>
+#include <pthread.h>
 #include <semaphore.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +10,7 @@
 #include <unistd.h>
 
 #include "include/business.h"
+#include "include/cache.h"
 #include "include/logger.h"
 #include "include/threadpool.h"
 #include "include/types.h"
@@ -135,6 +138,41 @@ void *read_file(struct read_file_args *const args) {
   // 释放参数
   free(args);
 
+  pthread_mutex_lock(cache_hash_table_mutex);
+  // 从 hash table 中寻找文件名
+  struct cached_file_handle *found_handle =
+      g_hash_table_lookup(cache_hash_table, &buffer[5]);
+  pthread_mutex_unlock(cache_hash_table_mutex);
+
+  // 如果文件名找到，无需读文件，直接进行 send_cached_message
+  if (found_handle != NULL) {
+    // 将要使用该 handle 的任务增加一个
+    pthread_mutex_lock(&found_handle->content_free_lock);
+    found_handle->readers_count++;
+    pthread_mutex_unlock(&found_handle->content_free_lock);
+
+    // 记录，然后释放当前 buffer
+    logger(LOG, "SEND_CACHED", &buffer[5], hit);
+    free(buffer);
+
+    // 创建新任务执行 send_cached_message
+    struct send_cached_message_args *const next_args =
+        (struct send_cached_message_args *)malloc(sizeof(*next_args));
+    next_args->socketfd = socketfd;
+    next_args->handle = found_handle;
+
+    task *new_task = (task *)malloc(sizeof(task));
+    new_task->next = NULL;
+    new_task->function = (void *)send_cached_message;
+    new_task->arg = next_args;
+
+    add_task_to_thread_pool(send_message_pool, new_task);
+
+    return NULL;
+  }
+
+  // 否则需要打开文件，读文件，再进行 发送消息：(cache miss)
+
   // 打开文件
   int filefd = -1;
   if ((filefd = open(&buffer[5], O_RDONLY)) == -1) { // 打开指定的文件名
@@ -144,6 +182,9 @@ void *read_file(struct read_file_args *const args) {
   }
 
   logger(LOG, "SEND", &buffer[5], hit);
+
+  // 文件存在，创建新的 handle，准备放入
+  struct cached_file_handle *new_handle = cached_file_handle_init(&buffer[5]);
 
   off_t len = lseek(filefd, (off_t)0, SEEK_END); // 通过 lseek 获取文件长度
   lseek(filefd, (off_t)0, SEEK_SET); // 将文件指针移到文件首位置
@@ -172,6 +213,7 @@ void *read_file(struct read_file_args *const args) {
   next_args->filefd = filefd;
   next_args->socketfd = socketfd;
   next_args->buffer = buffer;
+  next_args->handle = new_handle;
 
   // 创建 task
   task *const new_task = (task *)malloc(sizeof(task));
@@ -190,6 +232,7 @@ void *send_mesage(struct send_mesage_args *const args) {
   const int filefd = args->filefd;
   const int socketfd = args->socketfd;
   char *const buffer = args->buffer;
+  struct cached_file_handle *const handle = args->handle;
 
   // 释放传进来的参数
   free(args);
@@ -202,15 +245,72 @@ void *send_mesage(struct send_mesage_args *const args) {
 
   // CRITICAL SECTION BEGINS
 
+  const size_t header_length = strlen(buffer);
   // 写 header
-  write(socketfd, buffer, strlen(buffer));
+  write(socketfd, buffer, header_length);
+  // 同时放进 handle 内
+  cached_file_handle_add_content(handle, buffer, header_length);
 
-  // 写 body
   // 不停地从文件里读取文件内容，并通过 socket 通道向客户端返回文件内容
   int bytes_to_write = -1;
   while ((bytes_to_write = read(filefd, buffer, BUFSIZE)) > 0) {
+    // 写 body
     write(socketfd, buffer, bytes_to_write);
+    // 同时放进 handle 内
+    cached_file_handle_add_content(handle, buffer, bytes_to_write);
   }
+
+  // 将新的 handle 放入 hash 表中
+  pthread_mutex_lock(cache_hash_table_mutex);
+  // 检查是否已经存在该 entry
+  if (g_hash_table_contains(cache_hash_table, handle->path_to_file)) {
+    // 丢弃当前 handle
+    cached_file_handle_free(handle);
+
+    // 进行退出操作
+    pthread_mutex_unlock(cache_hash_table_mutex);
+    // CRITICAL SECTION ENDS
+    if (sem_post(output_sempaphore) < 0) {
+      perror("sem_post");
+      exit(EXIT_FAILURE);
+    }
+
+    // 关闭文件，关闭 socket
+    close(filefd);
+    close(socketfd);
+
+    // 释放 buffer
+    free(buffer);
+
+    return NULL;
+  }
+
+  // 如果 hash 表未满，则直接加入
+  // if (g_hash_table_size(cache_hash_table) < MAX_HASH_TABLE_SIZE) {
+    g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
+
+    // 进行退出操作
+    pthread_mutex_unlock(cache_hash_table_mutex);
+    // CRITICAL SECTION ENDS
+    if (sem_post(output_sempaphore) < 0) {
+      perror("sem_post");
+      exit(EXIT_FAILURE);
+    }
+
+    // 关闭文件，关闭 socket
+    close(filefd);
+    close(socketfd);
+
+    // 释放 buffer
+    free(buffer);
+
+    return NULL;
+  // }
+
+  // 否则，执行 LRU / LFU 操作
+  LRU_replace(cache_hash_table, handle);
+
+  pthread_mutex_unlock(cache_hash_table_mutex);
 
   // CRITICAL SECTION ENDS
   if (sem_post(output_sempaphore) < 0) {
@@ -221,9 +321,57 @@ void *send_mesage(struct send_mesage_args *const args) {
   // 关闭文件，关闭 socket
   close(filefd);
   close(socketfd);
- 
+
   // 释放 buffer
   free(buffer);
+
+  return NULL;
+}
+
+// 发送已经缓存的消息
+void *send_cached_message(struct send_cached_message_args *const args) {
+  // 获得 handle 和 socket fd
+  const int socketfd = args->socketfd;
+  struct cached_file_handle *handle = args->handle;
+  free(args);
+
+  // 使用信号量保证回应的连续性
+  if (sem_wait(output_sempaphore) < 0) {
+    perror("sem_wait");
+    exit(EXIT_FAILURE);
+  }
+
+  // CRITICAL SECTION BEGINS
+  GList *ptr = handle->contents;
+
+  // 不停地 content list 读取文件内容，并通过 socket 通道向客户端返回文件内容
+  while (ptr != NULL) {
+    // printf("ptr: %p\n", ptr);
+
+    // 写 body
+    write(socketfd, ((struct string_fragment *)(ptr->data))->content,
+          ((struct string_fragment *)(ptr->data))->size);
+    ptr = ptr->next;
+  }
+
+  // CRITICAL SECTION ENDS
+
+  // 将要使用该 handle 的任务减少一个
+  pthread_mutex_lock(&handle->content_free_lock);
+  handle->readers_count--;
+  // 如果为 0，即可释放
+  if (handle->readers_count == 0) {
+    pthread_cond_signal(&handle->content_has_reader);
+  }
+  pthread_mutex_unlock(&handle->content_free_lock);
+
+  if (sem_post(output_sempaphore) < 0) {
+    perror("sem_post");
+    exit(EXIT_FAILURE);
+  }
+
+  // 关闭 socketfd 这个很重要！！！不加就是在吃系统资源
+  close(socketfd);
 
   return NULL;
 }

@@ -4,6 +4,7 @@
 
 #include <sys/types.h>
 
+#include "cache.h"
 #include "types.h"
 
 // 三种业务的不同参数
@@ -33,15 +34,27 @@ struct send_mesage_args {
   int socketfd;
   // 缓冲区
   char *buffer;
+  // 新创建的 handle
+  struct cached_file_handle *handle;
+};
+
+// 发送已经缓存的回应的参数
+struct send_cached_message_args {
+  // socket file descriptor
+  int socketfd;
+  struct cached_file_handle *handle;
 };
 
 // 读消息
-void* read_message(struct read_message_args *const args);
+void *read_message(struct read_message_args *const args);
 
 // 读文件
-void* read_file(struct read_file_args *const args);
+void *read_file(struct read_file_args *const args);
 
 // 发送消息
-void* send_mesage(struct send_mesage_args *const args);
+void *send_mesage(struct send_mesage_args *const args);
+
+// 发送已经缓存的消息
+void *send_cached_message(struct send_cached_message_args *const args);
 
 #endif

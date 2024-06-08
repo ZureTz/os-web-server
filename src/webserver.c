@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <bits/pthreadtypes.h>
+#include <glib.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -24,6 +25,7 @@
 #include <unistd.h>
 
 #include "include/business.h"
+#include "include/cache.h"
 #include "include/interrupt.h"
 #include "include/logger.h"
 #include "include/threadpool.h"
@@ -49,6 +51,11 @@ sem_t *thread_block_time_sempaphore = NULL;
 threadpool *read_message_pool = NULL;
 threadpool *read_file_pool = NULL;
 threadpool *send_message_pool = NULL;
+
+// 缓存用 hash 表
+GHashTable *cache_hash_table = NULL;
+// 缓存用 hash 表的锁
+pthread_mutex_t *cache_hash_table_mutex = NULL;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -120,10 +127,21 @@ int main(int argc, char const *argv[]) {
   read_file_pool = init_thread_pool(NUM_THREADS);
   send_message_pool = init_thread_pool(NUM_THREADS);
 
+  // 初始化缓存所用 hash 表
+  cache_hash_table = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
+                                           cached_file_handle_free);
+  // 初始化 hash 表的锁
+  cache_hash_table_mutex =
+      (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+  if (pthread_mutex_init(cache_hash_table_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
+
   // 创建一个 monitor 线程来监控性能
-  pthread_t monitor_thread;
-  pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
-  pthread_detach(monitor_thread);
+  // pthread_t monitor_thread;
+  // pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
+  // pthread_detach(monitor_thread);
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
