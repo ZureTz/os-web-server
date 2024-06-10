@@ -109,6 +109,17 @@ void *monitor(void) {
     printf("send_message_pool:\n\t"
            "最高活跃: %d threads, 最低活跃：%d threads\n",
            max_send_message_thread_working, min_send_message_thread_working);
+
+    pthread_mutex_lock(&free_memory_pool->thread_count_lock);
+    const int max_free_memory_thread_working =
+        free_memory_pool->max_num_working;
+    const int min_free_memory_thread_working =
+        free_memory_pool->min_num_working;
+    pthread_mutex_unlock(&free_memory_pool->thread_count_lock);
+
+    printf("free_memory_pool:\n\t"
+           "最高活跃: %d threads, 最低活跃：%d threads\n",
+           max_free_memory_thread_working, min_free_memory_thread_working);
   }
 
   return NULL;

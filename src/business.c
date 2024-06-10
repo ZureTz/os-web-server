@@ -1,3 +1,4 @@
+#include <bits/time.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -7,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "include/business.h"
@@ -142,7 +144,6 @@ void *read_file(struct read_file_args *const args) {
   // 从 hash table 中寻找文件名
   struct cached_file_handle *found_handle =
       g_hash_table_lookup(cache_hash_table, &buffer[5]);
-  pthread_mutex_unlock(cache_hash_table_mutex);
 
   // 如果文件名找到，无需读文件，直接进行 send_cached_message
   if (found_handle != NULL) {
@@ -150,8 +151,9 @@ void *read_file(struct read_file_args *const args) {
     pthread_mutex_lock(&found_handle->content_free_lock);
     found_handle->readers_count++;
     pthread_mutex_unlock(&found_handle->content_free_lock);
+    pthread_mutex_unlock(cache_hash_table_mutex);
 
-    // 记录，然后释放当前 buffer
+    // log，然后释放当前 buffer
     logger(LOG, "SEND_CACHED", &buffer[5], hit);
     free(buffer);
 
@@ -170,6 +172,8 @@ void *read_file(struct read_file_args *const args) {
 
     return NULL;
   }
+
+  pthread_mutex_unlock(cache_hash_table_mutex);
 
   // 否则需要打开文件，读文件，再进行 发送消息：(cache miss)
 
@@ -260,55 +264,24 @@ void *send_mesage(struct send_mesage_args *const args) {
     cached_file_handle_add_content(handle, buffer, bytes_to_write);
   }
 
+  // 关闭文件，关闭 socket
+  close(filefd);
+  close(socketfd);
+
+  // 释放 buffer
+  free(buffer);
+
   // 将新的 handle 放入 hash 表中
   pthread_mutex_lock(cache_hash_table_mutex);
+
   // 检查是否已经存在该 entry
   if (g_hash_table_contains(cache_hash_table, handle->path_to_file)) {
     // 丢弃当前 handle
     cached_file_handle_free(handle);
-
-    // 进行退出操作
-    pthread_mutex_unlock(cache_hash_table_mutex);
-    // CRITICAL SECTION ENDS
-    if (sem_post(output_sempaphore) < 0) {
-      perror("sem_post");
-      exit(EXIT_FAILURE);
-    }
-
-    // 关闭文件，关闭 socket
-    close(filefd);
-    close(socketfd);
-
-    // 释放 buffer
-    free(buffer);
-
-    return NULL;
+  } else {
+    // 否则，执行 LRU / LFU 操作
+    LRU_replace(handle);
   }
-
-  // 如果 hash 表未满，则直接加入
-  // if (g_hash_table_size(cache_hash_table) < MAX_HASH_TABLE_SIZE) {
-    g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
-
-    // 进行退出操作
-    pthread_mutex_unlock(cache_hash_table_mutex);
-    // CRITICAL SECTION ENDS
-    if (sem_post(output_sempaphore) < 0) {
-      perror("sem_post");
-      exit(EXIT_FAILURE);
-    }
-
-    // 关闭文件，关闭 socket
-    close(filefd);
-    close(socketfd);
-
-    // 释放 buffer
-    free(buffer);
-
-    return NULL;
-  // }
-
-  // 否则，执行 LRU / LFU 操作
-  LRU_replace(cache_hash_table, handle);
 
   pthread_mutex_unlock(cache_hash_table_mutex);
 
@@ -317,13 +290,6 @@ void *send_mesage(struct send_mesage_args *const args) {
     perror("sem_post");
     exit(EXIT_FAILURE);
   }
-
-  // 关闭文件，关闭 socket
-  close(filefd);
-  close(socketfd);
-
-  // 释放 buffer
-  free(buffer);
 
   return NULL;
 }
@@ -334,6 +300,21 @@ void *send_cached_message(struct send_cached_message_args *const args) {
   const int socketfd = args->socketfd;
   struct cached_file_handle *handle = args->handle;
   free(args);
+
+  // 更新 handle 的使用时间
+  pthread_mutex_lock(&handle->recent_used_time_mutex);
+  struct timespec last_used_time = handle->recent_used_time;
+  clock_gettime(CLOCK_REALTIME, &handle->recent_used_time);
+
+  // 创建新 node 节点, 准备更新到 LRU tree 中
+  struct LRU_tree_node *new_node =
+      (struct LRU_tree_node *)malloc(sizeof(*new_node));
+  new_node->recent_used_time = handle->recent_used_time;
+  new_node->path_to_file = handle->path_to_file;
+  pthread_mutex_unlock(&handle->recent_used_time_mutex);
+
+  // 更新 LRU Tree
+  LRU_tree_update(new_node, last_used_time);
 
   // 使用信号量保证回应的连续性
   if (sem_wait(output_sempaphore) < 0) {
@@ -354,7 +335,8 @@ void *send_cached_message(struct send_cached_message_args *const args) {
     ptr = ptr->next;
   }
 
-  // CRITICAL SECTION ENDS
+  // 关闭 socketfd 这个很重要！！！不加就是在吃系统资源
+  close(socketfd);
 
   // 将要使用该 handle 的任务减少一个
   pthread_mutex_lock(&handle->content_free_lock);
@@ -365,13 +347,11 @@ void *send_cached_message(struct send_cached_message_args *const args) {
   }
   pthread_mutex_unlock(&handle->content_free_lock);
 
+  // CRITICAL SECTION ENDS
   if (sem_post(output_sempaphore) < 0) {
     perror("sem_post");
     exit(EXIT_FAILURE);
   }
-
-  // 关闭 socketfd 这个很重要！！！不加就是在吃系统资源
-  close(socketfd);
 
   return NULL;
 }

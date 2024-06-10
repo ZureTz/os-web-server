@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <time.h>
 
 #define MAX_HASH_TABLE_SIZE 64
 
@@ -21,6 +22,11 @@ struct cached_file_handle {
   // 释放 content 时的锁
   pthread_mutex_t content_free_lock;
   pthread_cond_t content_has_reader;
+
+  // LRU: 最近使用时间
+  struct timespec recent_used_time;
+  // 读写最近使用时间的锁
+  pthread_mutex_t recent_used_time_mutex;
 };
 
 // 初始化该 handle
@@ -33,6 +39,8 @@ void cached_file_handle_add_content(struct cached_file_handle *const handle,
 // 释放 handle
 // hash 表使用，**不要直接调用**
 void cached_file_handle_free(gpointer handle);
+// 释放 handle 的线程池里面的线程做的事
+void *cached_file_handle_free_thread_do(gpointer args);
 
 // content 中指针指向的每个小字符串碎片
 struct string_fragment {
@@ -58,42 +66,49 @@ extern pthread_mutex_t *cache_hash_table_mutex;
 
 // LRU 算法所用的 tree
 extern GTree *LRU_tree;
+// LRU 算法所用的 tree 的互斥锁
+extern pthread_mutex_t *LRU_tree_mutex;
 
 // LRU 算法所用的 tree node
-struct LRU_tree_node {};
+struct LRU_tree_node {
+  struct timespec recent_used_time;
+  char *path_to_file;
+};
 
-// 插入 node
-void LRU_tree_insert(struct LRU_tree_node *node);
+// 销毁 node
+void LRU_tree_node_destroy(gpointer node);
+
+// 插入 node 到 LRU tree 中
+void LRU_tree_update(struct LRU_tree_node *new_node,
+                     struct timespec last_used_time);
 
 // Tree 中 node 的比较函数
 gint LRU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
 
-// 销毁 node
-void LRU_tree_node_destroy(gpointer key);
-
 // LRU替换算法
-void LRU_replace(GHashTable *const hash_table,
-                 struct cached_file_handle *handle);
+void LRU_replace(struct cached_file_handle *handle);
 
 // LFU utilities
 
 // LFU 算法所用的 tree
-extern GTree *LFU_tree;
+// extern GTree *LFU_tree;
+// LFU 算法所用的 tree 的互斥锁
+// extern pthread_mutex_t *LFU_tree_mutex;
 
 // LRU 算法所用的 tree node
 struct LFU_tree_node {};
 
 // 插入 node
-void LFU_tree_insert(struct LFU_tree_node *node);
+// void LFU_tree_insert(struct LFU_tree_node *node);
 
-// Tree 中 node 的比较函数
-gint LFU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
+// // Tree 中 node 的比较函数
+// gint LFU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
 
-// 销毁 node
-void LFU_tree_node_destroy(gpointer key);
+// // 销毁 node
+// void LFU_tree_node_destroy(gpointer key);
 
-// LFU 替换算法
-void LFU_replace(GHashTable *const hash_table,
-                 struct cached_file_handle *handle);
+// // LFU 替换算法
+// void LFU_replace(GHashTable *const hash_table,
+//                  struct cached_file_handle *handle);
 
 #endif

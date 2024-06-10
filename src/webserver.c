@@ -51,11 +51,20 @@ sem_t *thread_block_time_sempaphore = NULL;
 threadpool *read_message_pool = NULL;
 threadpool *read_file_pool = NULL;
 threadpool *send_message_pool = NULL;
+threadpool *free_memory_pool = NULL;
 
 // 缓存用 hash 表
 GHashTable *cache_hash_table = NULL;
 // 缓存用 hash 表的锁
 pthread_mutex_t *cache_hash_table_mutex = NULL;
+// LRU 算法用到的树
+GTree *LRU_tree;
+// LRU 算法所用的 tree 的互斥锁
+pthread_mutex_t *LRU_tree_mutex = NULL;
+// LFU 算法用到的树
+// GTree *LFU_tree;
+// LFU 算法所用的 tree 的互斥锁
+// extern pthread_mutex_t *LFU_tree_mutex;
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -65,6 +74,12 @@ void sig_handler_init(void);
 
 // 用来初始化信号量的函数
 sem_t *semaphore_allocate_init(void);
+
+// 初始化 hash table
+void cache_hash_table_init(void);
+
+// 初始化 LRU Tree
+void LRU_tree_init(void);
 
 int main(int argc, char const *argv[]) {
   // 解析命令参数
@@ -126,22 +141,18 @@ int main(int argc, char const *argv[]) {
   read_message_pool = init_thread_pool(NUM_THREADS);
   read_file_pool = init_thread_pool(NUM_THREADS);
   send_message_pool = init_thread_pool(NUM_THREADS);
+  free_memory_pool = init_thread_pool(NUM_THREADS);
 
-  // 初始化缓存所用 hash 表
-  cache_hash_table = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
-                                           cached_file_handle_free);
-  // 初始化 hash 表的锁
-  cache_hash_table_mutex =
-      (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
-  if (pthread_mutex_init(cache_hash_table_mutex, NULL) != 0) {
-    perror("pthread_mutex_init failed");
-    exit(EXIT_FAILURE);
-  }
+  // 初始化 cache_hash_table 及其互斥锁
+  cache_hash_table_init();
+
+  // 初始化 LRU Tree 及其互斥锁
+  LRU_tree_init();
 
   // 创建一个 monitor 线程来监控性能
-  // pthread_t monitor_thread;
-  // pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
-  // pthread_detach(monitor_thread);
+  pthread_t monitor_thread;
+  pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
+  pthread_detach(monitor_thread);
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
@@ -220,4 +231,31 @@ sem_t *semaphore_allocate_init(void) {
 
   // passing back
   return semaphore;
+}
+
+// 初始化 hash table
+void cache_hash_table_init(void) {
+  // 初始化缓存所用 hash 表
+  cache_hash_table = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
+                                           //  cached_file_handle_free);
+                                           cached_file_handle_free);
+  // 初始化 hash 表的锁
+  cache_hash_table_mutex =
+      (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+  if (pthread_mutex_init(cache_hash_table_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
+}
+
+void LRU_tree_init(void) {
+  // 初始化 LRU Tree
+  LRU_tree =
+      g_tree_new_full(LRU_tree_node_cmp, NULL, LRU_tree_node_destroy, NULL);
+  // 初始化LRU 算法所用的 tree 的互斥锁
+  LRU_tree_mutex = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+  if (pthread_mutex_init(LRU_tree_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
 }

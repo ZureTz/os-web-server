@@ -89,5 +89,6 @@ task *take_taskqueue(struct taskqueue *queue);
 extern threadpool *read_message_pool;
 extern threadpool *read_file_pool;
 extern threadpool *send_message_pool;
+extern threadpool *free_memory_pool;
 
 #endif
