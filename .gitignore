@@ -80,3 +80,4 @@ dkms.conf
 
 # vscode conf
 .vscode/
+.clangd

@@ -5,7 +5,6 @@
 #include <sys/types.h>
 
 #include "cache.h"
-#include "types.h"
 
 // 三种业务的不同参数
 

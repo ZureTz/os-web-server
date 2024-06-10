@@ -4,8 +4,6 @@
 
 #include <semaphore.h>
 
-#include "threadpool.h"
-
 #define BUFSIZE 8096
 #define ERROR 42
 #define FORBIDDEN 403

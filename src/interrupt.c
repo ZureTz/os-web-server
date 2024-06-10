@@ -10,7 +10,6 @@
 #include "include/cache.h"
 #include "include/interrupt.h"
 #include "include/threadpool.h"
-#include "include/timer.h"
 #include "include/types.h"
 
 void sig_handler_init(void) {

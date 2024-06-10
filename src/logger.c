@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include "include/logger.h"
-#include "include/timer.h"
 #include "include/types.h"
 
 // 日志函数，将运行过程中的提示信息记录到 webserver.log 文件中

@@ -10,7 +10,7 @@ sudo pacman -S glib
 
 - or Follow the [instructions](https://github.com/GNOME/glib/blob/main/INSTALL.md).
 
-### 2. Edit `.clangd`
+### 2. Edit `.clangd.template` then rename it to `.clangd`
 
 Replace Include path to yourselves (this differs by operating systems)
  - Run `pkg-config --cflags glib-2.0` to see include paths to add.
@@ -33,6 +33,7 @@ Replace Include path to yourselves (this differs by operating systems)
     Compiler: gcc
       
   ```
+Then rename `.clangd.template` to `.clangd`.
 
 ## Run the program
 
