@@ -18,6 +18,12 @@
 
 #define NUM_THREADS 8
 
+#define MAX_HASH_TABLE_SIZE 16384
+
+// 使用 LRU 或者 LFU
+#define USE_LRU
+// #define USE_LFU
+
 // file extensions
 struct file_extension {
   const char *ext;

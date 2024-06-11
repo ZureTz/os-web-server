@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "include/cache.h"
 #include "include/threadpool.h"
 #include "include/timer.h"
 #include "include/types.h"
@@ -120,6 +121,12 @@ void *monitor(void) {
     printf("free_memory_pool:\n\t"
            "最高活跃: %d threads, 最低活跃：%d threads\n",
            max_free_memory_thread_working, min_free_memory_thread_working);
+
+    printf("缓存命中次数为: %lu\n", cache_hit_times);
+    printf("缓存未命中次数为: %lu\n", cache_miss_times);
+    printf("缓存命中率为: %%%.2f\n",
+           100.0 * ((double)cache_hit_times /
+                    (double)(cache_hit_times + cache_miss_times)));
   }
 
   return NULL;

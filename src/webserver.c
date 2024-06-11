@@ -57,14 +57,27 @@ threadpool *free_memory_pool = NULL;
 GHashTable *cache_hash_table = NULL;
 // 缓存用 hash 表的锁
 pthread_mutex_t *cache_hash_table_mutex = NULL;
+// 缓存hit/miss次数, protected by cache_hash_table_mutex
+unsigned long cache_hit_times = 0;
+unsigned long cache_miss_times = 0;
+
+#ifdef USE_LRU
 // LRU 算法用到的树
 GTree *LRU_tree;
 // LRU 算法所用的 tree 的互斥锁
 pthread_mutex_t *LRU_tree_mutex = NULL;
+// 初始化 LRU Tree
+void LRU_tree_init(void);
+#endif
+
+#ifdef USE_LFU
 // LFU 算法用到的树
-// GTree *LFU_tree;
+GTree *LFU_tree;
 // LFU 算法所用的 tree 的互斥锁
-// extern pthread_mutex_t *LFU_tree_mutex;
+pthread_mutex_t *LFU_tree_mutex = NULL;
+// 初始化 LFU Tree
+void LFU_tree_init(void);
+#endif
 
 // 解析命令参数
 void argument_check(int argc, char const *argv[]);
@@ -77,9 +90,6 @@ sem_t *semaphore_allocate_init(void);
 
 // 初始化 hash table
 void cache_hash_table_init(void);
-
-// 初始化 LRU Tree
-void LRU_tree_init(void);
 
 int main(int argc, char const *argv[]) {
   // 解析命令参数
@@ -123,8 +133,6 @@ int main(int argc, char const *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  printf("%s\n", "Server running...waiting for connections.");
-
   static struct sockaddr_in cli_addr; // static = initialised to zeros
   socklen_t length = sizeof(cli_addr);
 
@@ -146,13 +154,21 @@ int main(int argc, char const *argv[]) {
   // 初始化 cache_hash_table 及其互斥锁
   cache_hash_table_init();
 
-  // 初始化 LRU Tree 及其互斥锁
+  // 初始化 LRU/LFU Tree 及其互斥锁
+#ifdef USE_LRU
   LRU_tree_init();
+#endif
+
+#ifdef USE_LFU
+  LFU_tree_init();
+#endif
 
   // 创建一个 monitor 线程来监控性能
   pthread_t monitor_thread;
   pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
   pthread_detach(monitor_thread);
+
+  printf("%s\n", "Server running...waiting for connections.");
 
   for (long hit = 1;; hit++) {
     // Await a connection on socket FD.
@@ -248,8 +264,9 @@ void cache_hash_table_init(void) {
   }
 }
 
+#ifdef USE_LRU
+// 初始化 LRU Tree
 void LRU_tree_init(void) {
-  // 初始化 LRU Tree
   LRU_tree =
       g_tree_new_full(LRU_tree_node_cmp, NULL, LRU_tree_node_destroy, NULL);
   // 初始化LRU 算法所用的 tree 的互斥锁
@@ -259,3 +276,18 @@ void LRU_tree_init(void) {
     exit(EXIT_FAILURE);
   }
 }
+#endif
+
+#ifdef USE_LFU
+// 初始化 LRU Tree
+void LFU_tree_init(void) {
+  LFU_tree =
+      g_tree_new_full(LFU_tree_node_cmp, NULL, LFU_tree_node_destroy, NULL);
+  // 初始化LRU 算法所用的 tree 的互斥锁
+  LFU_tree_mutex = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+  if (pthread_mutex_init(LFU_tree_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
+}
+#endif

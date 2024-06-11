@@ -114,7 +114,7 @@ void destroy_thread_pool(threadpool *pool) {
   pool->is_alive = false;
 
   // 等待结束
-  wait_thread_pool(pool);
+  // wait_thread_pool(pool);
 
   // 销毁任务队列
   destroy_taskqueue(&pool->queue);

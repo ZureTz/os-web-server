@@ -10,6 +10,7 @@
 
 #include "include/cache.h"
 #include "include/threadpool.h"
+#include "include/types.h"
 
 // 初始化该 handle
 struct cached_file_handle *cached_file_handle_init(const char *path_to_file) {
@@ -19,7 +20,13 @@ struct cached_file_handle *cached_file_handle_init(const char *path_to_file) {
   handle->path_to_file = strdup(path_to_file);
   handle->contents = NULL;
   handle->readers_count = 0;
+#ifdef USE_LRU
   handle->recent_used_time.tv_sec = handle->recent_used_time.tv_nsec = 0;
+#endif
+
+#ifdef USE_LFU
+  handle->used_times = 0;
+#endif
 
   // 初始化各个 mutex
   if (pthread_mutex_init(&handle->content_free_lock, NULL) != 0) {
@@ -27,10 +34,19 @@ struct cached_file_handle *cached_file_handle_init(const char *path_to_file) {
     exit(EXIT_FAILURE);
   }
 
+#ifdef USE_LRU
   if (pthread_mutex_init(&handle->recent_used_time_mutex, NULL) != 0) {
     perror("pthread_mutex_init failed");
     exit(EXIT_FAILURE);
   }
+#endif
+
+#ifdef USE_LFU
+  if (pthread_mutex_init(&handle->used_times_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
+#endif
 
   // 初始化条件变量属性
   pthread_condattr_t cattr;
@@ -111,10 +127,12 @@ void string_fragment_free(void *string_fragment_passed) {
   free(string_fragment);
 }
 
+#ifdef USE_LRU
+
 // 销毁 node
 void LRU_tree_node_destroy(gpointer node) { free(node); }
 
-// 插入 node 到 LRU tree 中
+// 插入 node 到 LRU tree 中 (如果使用时间已经存在,则更新)
 void LRU_tree_update(struct LRU_tree_node *new_node,
                      struct timespec last_used_time) {
   struct LRU_tree_node temp_node;
@@ -142,13 +160,13 @@ gint LRU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data) {
 
 // debugdebugdebugdebugdebugdebugdebug
 // gboolean traverse(gpointer key, gpointer value, gpointer data) {
-  // (void)value;
-  // (void)data;
-  // struct LRU_tree_node *node = key;
-// 
-  // printf("Traversed %s: @%ld, %ld\n", node->path_to_file,
-        //  node->recent_used_time.tv_sec, node->recent_used_time.tv_nsec);
-  // return false;
+// (void)value;
+// (void)data;
+// struct LRU_tree_node *node = key;
+//
+// printf("Traversed %s: @%ld, %ld\n", node->path_to_file,
+//  node->recent_used_time.tv_sec, node->recent_used_time.tv_nsec);
+// return false;
 // }
 // gubedgubedgubedgubedgubedgubedgubed
 
@@ -166,12 +184,11 @@ void LRU_replace(struct cached_file_handle *handle) {
   new_node->path_to_file = handle->path_to_file;
   pthread_mutex_unlock(&handle->recent_used_time_mutex);
 
-  // 更新 LRU Tree
-  LRU_tree_update(new_node, last_used_time);
-
   // 如果 hash 表未满，则直接加入
   if (g_hash_table_size(cache_hash_table) < MAX_HASH_TABLE_SIZE) {
     g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
+    // 更新 LRU Tree
+    LRU_tree_update(new_node, last_used_time);
     return;
   }
 
@@ -180,12 +197,6 @@ void LRU_replace(struct cached_file_handle *handle) {
   struct LRU_tree_node *least_recent_used_key =
       g_tree_node_key(g_tree_node_first(LRU_tree));
   char *const path_to_file = least_recent_used_key->path_to_file;
-  // debugdebugdebugdebugdebugdebugdebug
-  // g_tree_foreach(LRU_tree, traverse, NULL);
-  // printf("Earliest used %s: @%ld, %ld\n\n", path_to_file,
-        //  least_recent_used_key->recent_used_time.tv_sec,
-        //  least_recent_used_key->recent_used_time.tv_nsec);
-  // gubedgubedgubedgubedgubedgubedgubed
 
   // 删除 tree 中 节点
   g_tree_remove(LRU_tree, least_recent_used_key);
@@ -196,4 +207,100 @@ void LRU_replace(struct cached_file_handle *handle) {
 
   // 加入新内容
   g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
+  // 更新 LRU Tree
+  LRU_tree_update(new_node, last_used_time);
 }
+
+#endif
+
+#ifdef USE_LFU
+
+// 销毁 node
+void LFU_tree_node_destroy(gpointer node) { free(node); }
+
+// 插入 node 到 LFU tree 中 (如果使用时间已经存在,则更新)
+void LFU_tree_update(struct LFU_tree_node *new_node,
+                     unsigned long last_used_times) {
+  struct LFU_tree_node temp_node;
+  temp_node.used_times = last_used_times;
+  temp_node.path_to_file = new_node->path_to_file;
+
+  pthread_mutex_lock(LFU_tree_mutex);
+  g_tree_remove(LFU_tree, &temp_node);
+  g_tree_insert(LFU_tree, new_node, NULL);
+  pthread_mutex_unlock(LFU_tree_mutex);
+}
+
+// Tree 中 node 的比较函数
+gint LFU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data) {
+  struct LFU_tree_node *const a_node = (struct LFU_tree_node *)a;
+  struct LFU_tree_node *const b_node = (struct LFU_tree_node *)b;
+  // ignore user data
+  (void)user_data;
+
+  if (a_node->used_times == b_node->used_times) {
+    return strcmp(a_node->path_to_file, b_node->path_to_file);
+  }
+  return a_node->used_times - b_node->used_times;
+}
+
+// debugdebugdebugdebugdebugdebugdebug
+// gboolean traverse(gpointer key, gpointer value, gpointer data) {
+// (void)value;
+// (void)data;
+// struct LFU_tree_node *node = key;
+//
+// printf("Traversed %s: @%lu times\n", node->path_to_file, node->used_times);
+// return false;
+// }
+// gubedgubedgubedgubedgubedgubedgubed
+
+// LFU替换算法
+void LFU_replace(struct cached_file_handle *handle) {
+  // 记录最近使用次数
+  pthread_mutex_lock(&handle->used_times_mutex);
+  unsigned long last_used_times = handle->used_times;
+  handle->used_times++;
+
+  // 创建新 node 节点, 准备更新到 LFU tree 中
+  struct LFU_tree_node *new_node =
+      (struct LFU_tree_node *)malloc(sizeof(*new_node));
+  new_node->used_times = handle->used_times;
+  new_node->path_to_file = handle->path_to_file;
+  pthread_mutex_unlock(&handle->used_times_mutex);
+
+  // 如果 hash 表未满，则直接加入
+  unsigned int table_size = g_hash_table_size(cache_hash_table);
+  if (table_size < MAX_HASH_TABLE_SIZE) {
+    g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
+    // 更新 LFU Tree
+    LFU_tree_update(new_node, last_used_times);
+    return;
+  }
+
+  // 否则, 替换最近未使用过的
+  pthread_mutex_lock(LFU_tree_mutex);
+  struct LFU_tree_node *least_frequent_used_key =
+      g_tree_node_key(g_tree_node_first(LFU_tree));
+  char *const path_to_file = least_frequent_used_key->path_to_file;
+  // debugdebugdebugdebugdebugdebugdebug
+  // g_tree_foreach(LFU_tree, traverse, NULL);
+  // printf("Earliest used %s: @%lu times\n\n", path_to_file,
+  //  least_frequent_used_key->used_times);
+  // gubedgubedgubedgubedgubedgubedgubed
+
+  // 删除 tree 中 节点
+  g_tree_remove(LFU_tree, least_frequent_used_key);
+  pthread_mutex_unlock(LFU_tree_mutex);
+
+  // 删除 hash 表中对应的内容
+  g_hash_table_remove(cache_hash_table, path_to_file);
+
+  // 加入新内容
+  // printf("Inserting: %s\n", handle->path_to_file);
+  g_hash_table_insert(cache_hash_table, handle->path_to_file, handle);
+  // 更新 LFU Tree
+  LFU_tree_update(new_node, last_used_times);
+}
+
+#endif

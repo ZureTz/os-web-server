@@ -28,8 +28,19 @@ void interrupt_handler(int signal) {
   // 释放 hash 表 和树的资源
   g_hash_table_destroy(cache_hash_table);
   pthread_mutex_destroy(cache_hash_table_mutex);
+  free(cache_hash_table_mutex);
+
+#ifdef USE_LRU
   g_tree_destroy(LRU_tree);
   pthread_mutex_destroy(LRU_tree_mutex);
+  free(LRU_tree_mutex);
+#endif
+
+#ifdef USE_LFU
+  g_tree_destroy(LFU_tree);
+  pthread_mutex_destroy(LFU_tree_mutex);
+  free(LFU_tree_mutex);
+#endif
 
   // 销毁线程池
   destroy_thread_pool(read_message_pool);

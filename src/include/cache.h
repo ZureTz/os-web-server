@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <time.h>
 
-#define MAX_HASH_TABLE_SIZE 64
+#include "types.h"
 
 // 缓存文件的 handle，含有键值对，哈希表用
 struct cached_file_handle {
@@ -23,10 +23,19 @@ struct cached_file_handle {
   pthread_mutex_t content_free_lock;
   pthread_cond_t content_has_reader;
 
+#ifdef USE_LRU
   // LRU: 最近使用时间
   struct timespec recent_used_time;
   // 读写最近使用时间的锁
   pthread_mutex_t recent_used_time_mutex;
+#endif
+
+#ifdef USE_LFU
+  // LRU: 最近使用次数
+  unsigned long used_times;
+  // 读写最近使用时间的锁
+  pthread_mutex_t used_times_mutex;
+#endif
 };
 
 // 初始化该 handle
@@ -62,7 +71,12 @@ extern GHashTable *cache_hash_table;
 // 不仅保护 hash 表，而且保护 LRU Tree / LFU Tree, 取决于所用的替换算法
 extern pthread_mutex_t *cache_hash_table_mutex;
 
+// 缓存hit/miss次数, protected by cache_hash_table_mutex
+extern unsigned long cache_hit_times;
+extern unsigned long cache_miss_times;
+
 // LRU utilities
+#ifdef USE_LRU
 
 // LRU 算法所用的 tree
 extern GTree *LRU_tree;
@@ -88,27 +102,36 @@ gint LRU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
 // LRU替换算法
 void LRU_replace(struct cached_file_handle *handle);
 
+#endif
+
+#ifdef USE_LFU
+
 // LFU utilities
 
 // LFU 算法所用的 tree
-// extern GTree *LFU_tree;
+extern GTree *LFU_tree;
 // LFU 算法所用的 tree 的互斥锁
-// extern pthread_mutex_t *LFU_tree_mutex;
+extern pthread_mutex_t *LFU_tree_mutex;
 
 // LRU 算法所用的 tree node
-struct LFU_tree_node {};
+struct LFU_tree_node {
+  unsigned long used_times;
+  char *path_to_file;
+};
 
-// 插入 node
-// void LFU_tree_insert(struct LFU_tree_node *node);
+// 销毁 node
+void LFU_tree_node_destroy(gpointer node);
 
-// // Tree 中 node 的比较函数
-// gint LFU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
+// 插入 node 到 LRU tree 中
+void LFU_tree_update(struct LFU_tree_node *new_node,
+                     unsigned long last_used_times);
 
-// // 销毁 node
-// void LFU_tree_node_destroy(gpointer key);
+// Tree 中 node 的比较函数
+gint LFU_tree_node_cmp(gconstpointer a, gconstpointer b, gpointer user_data);
 
-// // LFU 替换算法
-// void LFU_replace(GHashTable *const hash_table,
-//                  struct cached_file_handle *handle);
+// LRU替换算法
+void LFU_replace(struct cached_file_handle *handle);
+
+#endif
 
 #endif

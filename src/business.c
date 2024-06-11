@@ -17,6 +17,10 @@
 #include "include/threadpool.h"
 #include "include/types.h"
 
+#if !defined(USE_LRU) && !defined(USE_LFU)
+#error "Please select an page replacement algorithm(USE_LRU or USE_LFU)."
+#endif
+
 // 读消息
 void *read_message(struct read_message_args *const args) {
   const int socketfd = args->socketfd;
@@ -147,6 +151,8 @@ void *read_file(struct read_file_args *const args) {
 
   // 如果文件名找到，无需读文件，直接进行 send_cached_message
   if (found_handle != NULL) {
+    // cache hit 的次数增加
+    cache_hit_times++;
     // 将要使用该 handle 的任务增加一个
     pthread_mutex_lock(&found_handle->content_free_lock);
     found_handle->readers_count++;
@@ -173,9 +179,9 @@ void *read_file(struct read_file_args *const args) {
     return NULL;
   }
 
+  // 没有找到需要打开文件，读文件，再进行 发送消息：(cache miss)
+  cache_miss_times++;
   pthread_mutex_unlock(cache_hash_table_mutex);
-
-  // 否则需要打开文件，读文件，再进行 发送消息：(cache miss)
 
   // 打开文件
   int filefd = -1;
@@ -280,7 +286,13 @@ void *send_mesage(struct send_mesage_args *const args) {
     cached_file_handle_free(handle);
   } else {
     // 否则，执行 LRU / LFU 操作
+#ifdef USE_LRU
     LRU_replace(handle);
+#endif
+
+#ifdef USE_LFU
+    LFU_replace(handle);
+#endif
   }
 
   pthread_mutex_unlock(cache_hash_table_mutex);
@@ -301,6 +313,7 @@ void *send_cached_message(struct send_cached_message_args *const args) {
   struct cached_file_handle *handle = args->handle;
   free(args);
 
+#ifdef USE_LRU
   // 更新 handle 的使用时间
   pthread_mutex_lock(&handle->recent_used_time_mutex);
   struct timespec last_used_time = handle->recent_used_time;
@@ -315,6 +328,24 @@ void *send_cached_message(struct send_cached_message_args *const args) {
 
   // 更新 LRU Tree
   LRU_tree_update(new_node, last_used_time);
+#endif
+
+#ifdef USE_LFU
+  // 更新 handle 的使用次数
+  pthread_mutex_lock(&handle->used_times_mutex);
+  unsigned long last_used_times = handle->used_times;
+  handle->used_times++;
+
+  // 创建新 node 节点, 准备更新到 LFU tree 中
+  struct LFU_tree_node *new_node =
+      (struct LFU_tree_node *)malloc(sizeof(*new_node));
+  new_node->used_times = handle->used_times;
+  new_node->path_to_file = handle->path_to_file;
+  pthread_mutex_unlock(&handle->used_times_mutex);
+
+  // 更新 LFU Tree
+  LFU_tree_update(new_node, last_used_times);
+#endif
 
   // 使用信号量保证回应的连续性
   if (sem_wait(output_sempaphore) < 0) {
