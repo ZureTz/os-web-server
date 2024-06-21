@@ -6,6 +6,7 @@
 // are modified slightly
 
 // to use POSIX features
+#include <stdbool.h>
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 
@@ -28,6 +29,7 @@
 #include "include/cache.h"
 #include "include/interrupt.h"
 #include "include/logger.h"
+#include "include/memory.h"
 #include "include/threadpool.h"
 #include "include/timer.h"
 #include "include/types.h"
@@ -77,6 +79,21 @@ GTree *LFU_tree;
 pthread_mutex_t *LFU_tree_mutex = NULL;
 // 初始化 LFU Tree
 void LFU_tree_init(void);
+#endif
+
+#ifdef USE_POOL_ALLOC
+// 使用线程池的时候, 任务队列中的任务数量
+size_t global_task_count = 0;
+sem_t *global_task_count_semaphore = NULL;
+
+// hash表, 存放每个分配了内存的指针信息
+GHashTable *memory_hash_table = NULL;
+
+// 动态数组, 存放 pool 的指针
+GHashTable *pools = NULL;
+
+// 保护的 mutex
+pthread_mutex_t *memory_info_mutex = NULL;
 #endif
 
 // 解析命令参数
@@ -144,6 +161,25 @@ int main(int argc, char const *argv[]) {
   output_sempaphore = semaphore_allocate_init();
   thread_active_time_sempaphore = semaphore_allocate_init();
   thread_block_time_sempaphore = semaphore_allocate_init();
+
+#ifdef USE_POOL_ALLOC
+
+  global_task_count_semaphore = semaphore_allocate_init();
+  // 初始化 pool 所用 hash 表
+  memory_hash_table =
+      g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, NULL);
+
+  // 初始化 array
+  pools = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, NULL);
+
+  // 初始化 mutex
+  memory_info_mutex = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+  if (pthread_mutex_init(memory_info_mutex, NULL) != 0) {
+    perror("pthread_mutex_init failed");
+    exit(EXIT_FAILURE);
+  }
+
+#endif
 
   // 初始化3个线程池
   read_message_pool = init_thread_pool(NUM_THREADS);

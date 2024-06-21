@@ -9,15 +9,17 @@
 #include <time.h>
 
 #include "include/cache.h"
+#include "include/memory.h"
 #include "include/threadpool.h"
 #include "include/types.h"
 
 // 初始化该 handle
 struct cached_file_handle *cached_file_handle_init(const char *path_to_file) {
   struct cached_file_handle *handle =
-      (struct cached_file_handle *)calloc(1, sizeof(*handle));
+      (struct cached_file_handle *)calloc_impl(1, sizeof(*handle));
   // 复制 path_to_file的 string
-  handle->path_to_file = strdup(path_to_file);
+  handle->path_to_file = malloc_impl(sizeof(path_to_file) + 4);
+  strcpy(handle->path_to_file, path_to_file);
   handle->contents = NULL;
   handle->readers_count = 0;
 #ifdef USE_LRU
@@ -68,12 +70,13 @@ struct cached_file_handle *cached_file_handle_init(const char *path_to_file) {
 void cached_file_handle_add_content(struct cached_file_handle *const handle,
                                     char *content, const size_t content_size) {
   struct string_fragment *new_fragment =
-      (struct string_fragment *)malloc(sizeof(*new_fragment));
+      (struct string_fragment *)malloc_impl(sizeof(*new_fragment));
 
   // strdup 会在数据为 0 的时候停止，不能使用（尤其针对 binary 例如图片）
   // "new_fragment->content = strndup(content, content_size + 8);" is wrong!
   // 所以改用 malloc 加 memcpy的形式
-  new_fragment->content = (char *)malloc((content_size + 8) * sizeof(char));
+  new_fragment->content =
+      (char *)malloc_impl((content_size + 8) * sizeof(char));
   memcpy(new_fragment->content, content, content_size);
 
   new_fragment->size = content_size;
@@ -83,7 +86,7 @@ void cached_file_handle_add_content(struct cached_file_handle *const handle,
 
 // 释放 handle
 void cached_file_handle_free(gpointer handle_passed) {
-  task *new_task = (task *)malloc(sizeof(task));
+  task *new_task = (task *)malloc_impl(sizeof(task));
   new_task->next = NULL;
   new_task->function = cached_file_handle_free_thread_do;
   new_task->arg = handle_passed;
@@ -105,12 +108,12 @@ void *cached_file_handle_free_thread_do(gpointer handle_passed) {
   g_list_free_full(handle->contents, string_fragment_free);
 
   // 2. 释放 path to file
-  free(handle->path_to_file);
+  free_impl(handle->path_to_file);
 
   pthread_mutex_unlock(&handle->content_free_lock);
 
   // 3. 释放 handle
-  free(handle);
+  free_impl(handle);
 
   return NULL;
 }
@@ -121,16 +124,16 @@ void string_fragment_free(void *string_fragment_passed) {
       (struct string_fragment *)string_fragment_passed;
 
   // 释放字符串
-  free(string_fragment->content);
+  free_impl(string_fragment->content);
 
   // 释放自身
-  free(string_fragment);
+  free_impl(string_fragment);
 }
 
 #ifdef USE_LRU
 
 // 销毁 node
-void LRU_tree_node_destroy(gpointer node) { free(node); }
+void LRU_tree_node_destroy(gpointer node) { free_impl(node); }
 
 // 插入 node 到 LRU tree 中 (如果使用时间已经存在,则更新)
 void LRU_tree_update(struct LRU_tree_node *new_node,
@@ -179,7 +182,7 @@ void LRU_replace(struct cached_file_handle *handle) {
 
   // 创建新 node 节点, 准备更新到 LRU tree 中
   struct LRU_tree_node *new_node =
-      (struct LRU_tree_node *)malloc(sizeof(*new_node));
+      (struct LRU_tree_node *)malloc_impl(sizeof(*new_node));
   new_node->recent_used_time = handle->recent_used_time;
   new_node->path_to_file = handle->path_to_file;
   pthread_mutex_unlock(&handle->recent_used_time_mutex);
@@ -216,7 +219,7 @@ void LRU_replace(struct cached_file_handle *handle) {
 #ifdef USE_LFU
 
 // 销毁 node
-void LFU_tree_node_destroy(gpointer node) { free(node); }
+void LFU_tree_node_destroy(gpointer node) { free_impl(node); }
 
 // 插入 node 到 LFU tree 中 (如果使用时间已经存在,则更新)
 void LFU_tree_update(struct LFU_tree_node *new_node,
@@ -264,7 +267,7 @@ void LFU_replace(struct cached_file_handle *handle) {
 
   // 创建新 node 节点, 准备更新到 LFU tree 中
   struct LFU_tree_node *new_node =
-      (struct LFU_tree_node *)malloc(sizeof(*new_node));
+      (struct LFU_tree_node *)malloc_impl(sizeof(*new_node));
   new_node->used_times = handle->used_times;
   new_node->path_to_file = handle->path_to_file;
   pthread_mutex_unlock(&handle->used_times_mutex);

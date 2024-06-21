@@ -2,6 +2,7 @@
 #include <glib.h>
 #include <limits.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,8 +10,10 @@
 #include <sys/prctl.h>
 #include <time.h>
 
+#include "include/memory.h"
 #include "include/threadpool.h"
 #include "include/timer.h"
+#include "include/types.h"
 
 threadpool *init_thread_pool(int num_threads) {
   // 创建线程池空间
@@ -50,7 +53,7 @@ threadpool *init_thread_pool(int num_threads) {
   }
   // 创建线程数组
   pool->threads = (thread **)calloc(num_threads, sizeof(thread *));
-  //创建线程
+  // 创建线程
   for (int i = 0; i < num_threads; i++) {
     create_thread(pool, &pool->threads[i], i, attr);
   }
@@ -65,6 +68,20 @@ threadpool *init_thread_pool(int num_threads) {
 
 // 向线程池中添加任务
 void add_task_to_thread_pool(threadpool *pool, task *curtask) {
+// 任务增加
+#ifdef USE_POOL_ALLOC
+  if (sem_wait(global_task_count_semaphore) < 0) {
+    perror("sem_wait error");
+    exit(EXIT_FAILURE);
+  }
+
+  global_task_count++;
+
+  if (sem_post(global_task_count_semaphore) < 0) {
+    perror("sem_wait error");
+    exit(EXIT_FAILURE);
+  }
+#endif
   push_taskqueue(&pool->queue, curtask);
 }
 
@@ -215,6 +232,21 @@ void *thread_do(thread *pthread) {
       continue;
     }
 
+    // 修改存在的任务数量
+#ifdef USE_POOL_ALLOC
+    if (sem_wait(global_task_count_semaphore) < 0) {
+      perror("sem_wait error");
+      exit(EXIT_FAILURE);
+    }
+
+    global_task_count--;
+
+    if (sem_post(global_task_count_semaphore) < 0) {
+      perror("sem_wait error");
+      exit(EXIT_FAILURE);
+    }
+#endif
+
     // 从任务队列的队首提取任务并执行
     void *(*const function)(void *) = current_task->function;
     void *const arg = current_task->arg;
@@ -252,8 +284,6 @@ void *thread_do(thread *pthread) {
       pthread_cond_signal(&pool->threads_all_idle);
     }
     pthread_mutex_unlock(&pool->thread_count_lock);
-
-    // printf("%s: finished its job\n", thread_name);
 
     // 线程活跃结束
     // 活跃结束时间：

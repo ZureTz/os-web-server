@@ -1,10 +1,10 @@
 #pragma once
-#ifndef TYPE_H
-#define TYPE_H
+#ifndef TYPES_H
+#define TYPES_H
 
 #include <semaphore.h>
 
-#define BUFSIZE 8096
+#define BUFSIZE 8192
 #define ERROR 42
 #define FORBIDDEN 403
 #define LISTENQ 64
@@ -23,6 +23,9 @@
 // 使用 LRU 或者 LFU
 #define USE_LRU
 // #define USE_LFU
+
+// 使用传统或者内存池
+#define USE_POOL_ALLOC
 
 // file extensions
 struct file_extension {

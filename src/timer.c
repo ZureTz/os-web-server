@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "include/cache.h"
+#include "include/memory.h"
 #include "include/threadpool.h"
 #include "include/timer.h"
 #include "include/types.h"
@@ -127,6 +128,11 @@ void *monitor(void) {
     printf("缓存命中率为: %%%.2f\n",
            100.0 * ((double)cache_hit_times /
                     (double)(cache_hit_times + cache_miss_times)));
+
+#ifdef USE_POOL_ALLOC
+    printf("任务数量为%lu\n内存池数量为%u\n", global_task_count,
+           g_hash_table_size(pools));
+#endif
   }
 
   return NULL;

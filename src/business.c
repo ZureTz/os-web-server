@@ -14,6 +14,7 @@
 #include "include/business.h"
 #include "include/cache.h"
 #include "include/logger.h"
+#include "include/memory.h"
 #include "include/threadpool.h"
 #include "include/types.h"
 
@@ -30,7 +31,7 @@ void *read_message(struct read_message_args *const args) {
   free(args);
 
   // ** 记得完成回应后释放 buffer **
-  char *const buffer = (char *)calloc(BUFSIZE + 1, sizeof(char)); // 设置缓冲区
+  char *const buffer = (char *)calloc_impl(BUFSIZE + 1, sizeof(char)); // 设置缓冲区
 
   const int socket_read_ret =
       read(socketfd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息
@@ -114,7 +115,7 @@ void *read_message(struct read_message_args *const args) {
 
   // 设定参数
   struct read_file_args *const next_args =
-      (struct read_file_args *)malloc(sizeof(*next_args));
+      (struct read_file_args *)malloc_impl(sizeof(*next_args));
   // ** 记得完成回应后释放 buffer **
   next_args->buffer = buffer;
   next_args->socketfd = socketfd;
@@ -122,7 +123,7 @@ void *read_message(struct read_message_args *const args) {
   next_args->hit = hit;
 
   // 创建 task
-  task *const new_task = (task *)malloc(sizeof(task));
+  task *const new_task = (task *)malloc_impl(sizeof(task));
   new_task->next = NULL;
   new_task->function = (void *)read_file;
   new_task->arg = next_args;
@@ -142,7 +143,7 @@ void *read_file(struct read_file_args *const args) {
   const int hit = args->hit;
 
   // 释放参数
-  free(args);
+  free_impl(args);
 
   pthread_mutex_lock(cache_hash_table_mutex);
   // 从 hash table 中寻找文件名
@@ -161,15 +162,15 @@ void *read_file(struct read_file_args *const args) {
 
     // log，然后释放当前 buffer
     logger(LOG, "SEND_CACHED", &buffer[5], hit);
-    free(buffer);
+    free_impl(buffer);
 
     // 创建新任务执行 send_cached_message
     struct send_cached_message_args *const next_args =
-        (struct send_cached_message_args *)malloc(sizeof(*next_args));
+        (struct send_cached_message_args *)malloc_impl(sizeof(*next_args));
     next_args->socketfd = socketfd;
     next_args->handle = found_handle;
 
-    task *new_task = (task *)malloc(sizeof(task));
+    task *new_task = (task *)malloc_impl(sizeof(task));
     new_task->next = NULL;
     new_task->function = (void *)send_cached_message;
     new_task->arg = next_args;
@@ -219,14 +220,14 @@ void *read_file(struct read_file_args *const args) {
 
   // 准备调用 send_message
   struct send_mesage_args *const next_args =
-      (struct send_mesage_args *)malloc(sizeof(*next_args));
+      (struct send_mesage_args *)malloc_impl(sizeof(*next_args));
   next_args->filefd = filefd;
   next_args->socketfd = socketfd;
   next_args->buffer = buffer;
   next_args->handle = new_handle;
 
   // 创建 task
-  task *const new_task = (task *)malloc(sizeof(task));
+  task *const new_task = (task *)malloc_impl(sizeof(task));
   new_task->next = NULL;
   new_task->function = (void *)send_mesage;
   new_task->arg = next_args;
@@ -245,7 +246,7 @@ void *send_mesage(struct send_mesage_args *const args) {
   struct cached_file_handle *const handle = args->handle;
 
   // 释放传进来的参数
-  free(args);
+  free_impl(args);
 
   // 使用信号量保证回应的连续性
   if (sem_wait(output_sempaphore) < 0) {
@@ -275,7 +276,7 @@ void *send_mesage(struct send_mesage_args *const args) {
   close(socketfd);
 
   // 释放 buffer
-  free(buffer);
+  free_impl(buffer);
 
   // 将新的 handle 放入 hash 表中
   pthread_mutex_lock(cache_hash_table_mutex);
@@ -311,7 +312,7 @@ void *send_cached_message(struct send_cached_message_args *const args) {
   // 获得 handle 和 socket fd
   const int socketfd = args->socketfd;
   struct cached_file_handle *handle = args->handle;
-  free(args);
+  free_impl(args);
 
 #ifdef USE_LRU
   // 更新 handle 的使用时间
@@ -321,7 +322,7 @@ void *send_cached_message(struct send_cached_message_args *const args) {
 
   // 创建新 node 节点, 准备更新到 LRU tree 中
   struct LRU_tree_node *new_node =
-      (struct LRU_tree_node *)malloc(sizeof(*new_node));
+      (struct LRU_tree_node *)malloc_impl(sizeof(*new_node));
   new_node->recent_used_time = handle->recent_used_time;
   new_node->path_to_file = handle->path_to_file;
   pthread_mutex_unlock(&handle->recent_used_time_mutex);
@@ -338,7 +339,7 @@ void *send_cached_message(struct send_cached_message_args *const args) {
 
   // 创建新 node 节点, 准备更新到 LFU tree 中
   struct LFU_tree_node *new_node =
-      (struct LFU_tree_node *)malloc(sizeof(*new_node));
+      (struct LFU_tree_node *)malloc_impl(sizeof(*new_node));
   new_node->used_times = handle->used_times;
   new_node->path_to_file = handle->path_to_file;
   pthread_mutex_unlock(&handle->used_times_mutex);
