@@ -1,6 +1,6 @@
 PROGRAM = webserver
-FILES.c = src/webserver.c src/interrupt.c src/logger.c src/timer.c src/business.c src/threadpool.c src/cache.c src/memory.c
-FILES.h = src/include/interrupt.h src/include/logger.h src/include/timer.h src/include/types.h src/include/business.h src/include/threadpool.h src/include/cache.h src/include/memory.h
+FILES.c = server/webserver.c server/interrupt.c server/logger.c server/timer.c server/business.c server/threadpool.c server/cache.c server/memory.c
+FILES.h = server/include/interrupt.h server/include/logger.h server/include/timer.h server/include/types.h server/include/business.h server/include/threadpool.h server/include/cache.h server/include/memory.h
 FILES.o = ${FILES.c:.c=.o}
 
 NGINX_FILES.c = nginx-malloc/ngx_alloc.c nginx-malloc/ngx_palloc.c 
@@ -13,23 +13,21 @@ GFLAGS  = -g
 OFLAGS  = -O0
 WFLAG1  = -Wall
 WFLAG2  = -Wextra
-WFLAG3  = -Werror
+WFLAG3  = # -Werror
 WFLAGS  = ${WFLAG1} ${WFLAG2} ${WFLAG3}
 UFLAGS  = # Set on command line only
-GLIBFLAGS = `pkg-config --cflags glib-2.0`
+GLIBFLAGS = ${shell pkg-config --cflags glib-2.0}
 
-CFLAGS  = ${SFLAGS} ${GFLAGS} ${OFLAGS} ${WFLAGS} ${UFLAGS}  ${GLIBFLAGS}
+CFLAGS  = ${SFLAGS} ${GFLAGS} ${OFLAGS} ${WFLAGS} ${UFLAGS} ${GLIBFLAGS}
 LDFLAGS = 
-LDLIBS  = `pkg-config --libs glib-2.0`
+LDLIBS  = ${shell pkg-config --libs glib-2.0}
 
 all:	${PROGRAM}
 
 ${PROGRAM}: ${FILES.c} ${FILES.h} ${FILES.o} ${NGINX_FILES.c} ${NGINX_FILES.h} ${NGINX_FILES.o}
 	${CC} -o $@ ${CFLAGS} ${FILES.o} ${NGINX_FILES.o} ${LDFLAGS} ${LDLIBS} 
 		
-RM_FR  = rm -fr
-SRC_STR = src/
-EMPTY = 
+RM_FR  = rm -rf
 
 RUNTIME_ARGS = 8088 web/
 

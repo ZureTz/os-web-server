@@ -25,7 +25,7 @@
 // #define USE_LFU
 
 // 使用传统或者内存池
-#define USE_POOL_ALLOC
+// #define USE_POOL_ALLOC
 
 // file extensions
 struct file_extension {

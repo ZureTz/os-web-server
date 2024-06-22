@@ -31,7 +31,8 @@ void *read_message(struct read_message_args *const args) {
   free(args);
 
   // ** 记得完成回应后释放 buffer **
-  char *const buffer = (char *)calloc_impl(BUFSIZE + 1, sizeof(char)); // 设置缓冲区
+  char *const buffer =
+      (char *)calloc_impl(BUFSIZE + 1, sizeof(char)); // 设置缓冲区
 
   const int socket_read_ret =
       read(socketfd, buffer, BUFSIZE); // 从连接通道中读取客户端的请求消息

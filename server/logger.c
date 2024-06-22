@@ -78,14 +78,19 @@ void logger(const int type, const char *s1, const char *s2,
   // ENTERING CRITICAL SECTION
 
   // 将 logbuffer 缓存中的消息存入 webserver.log 文件
-  int fd = -1;
-  if ((fd = open("log/webserver.log", O_CREAT | O_WRONLY | O_APPEND, 0644)) >=
-      0) {
-    write(fd, timebuffer, strlen(timebuffer));
-    write(fd, logbuffer, strlen(logbuffer));
-    write(fd, "\n", 1);
-    close(fd);
-  }
+  // int fd = -1;
+  // if ((fd = open("log/webserver.log", O_CREAT | O_WRONLY | O_APPEND, 0644))
+  // >=
+  //     0) {
+  //   write(fd, timebuffer, strlen(timebuffer));
+  //   write(fd, logbuffer, strlen(logbuffer));
+  //   write(fd, "\n", 1);
+  //   close(fd);
+  // }
+
+  printf("%s", timebuffer);
+  printf("%s", logbuffer);
+  printf("%s", "\n");
 
   // CRITICAL SECTION ENDS
 

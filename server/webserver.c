@@ -200,9 +200,9 @@ int main(int argc, char const *argv[]) {
 #endif
 
   // 创建一个 monitor 线程来监控性能
-  pthread_t monitor_thread;
-  pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
-  pthread_detach(monitor_thread);
+  // pthread_t monitor_thread;
+  // pthread_create(&monitor_thread, NULL, (void *)monitor, NULL);
+  // pthread_detach(monitor_thread);
 
   printf("%s\n", "Server running...waiting for connections.");
 

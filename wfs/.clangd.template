@@ -1,0 +1,14 @@
+If:
+  PathMatch: 
+    - .*\.c
+    - .*\.h
+
+CompileFlags:
+  Add: [
+    -xc, 
+    -std=gnu17, 
+    -I/usr/include/fuse,
+    -D_FILE_OFFSET_BITS=64
+  ]
+  Compiler: gcc
+    
